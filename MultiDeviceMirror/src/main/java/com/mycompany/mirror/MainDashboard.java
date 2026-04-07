@@ -1,140 +1,164 @@
 package com.mycompany.mirror;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import javax.swing.*;
-import javax.swing.filechooser.FileNameExtensionFilter;
-import java.io.*;
-import java.util.ArrayList;
-import java.util.List;
 import java.awt.*;
 import java.awt.event.*;
-
+import java.io.*;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
-public class MainDashboard extends javax.swing.JFrame {
+public class MainDashboard extends JFrame {
 
-    private final int OFFSET_X = 7;  // geser kanan (+) / kiri (-)
-    private final int OFFSET_Y = 4;  // geser bawah (+) / atas (-)
+    // ================= CONFIG =================
+    private static final int COLS = 3;
+    private static final int GAP = 10;
+    private static final int PADDING = 10;
 
-    private final int COLS = 3;
-    private final int GAP = 10;
-    // --- PENGATURAN PATH ---
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
-    private final String adbPath = basePath + "adb.exe";
-    private final String scrcpyPath = basePath + "scrcpy.exe";
-    private java.util.Set<String> activeDevices = new java.util.HashSet<>();
-//===================================================================================================
+    private final String adbExecutable = basePath + "adb.exe";
+    private final String scrcpyExecutable = basePath + "scrcpy.exe";
+
+    // ================= STATE =================
+    private final Set<String> activeDevices = new HashSet<>();
+    private final Set<String> lastDevices = new HashSet<>();
+
+    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+
     private ScrcpyService scrcpyService;
     private WindowManager windowManager;
-    private ExecutorService executor = Executors.newFixedThreadPool(10);
-// index grid
+
     private int currentIndex = 0;
 
-// auto detect device
-    private java.util.Set<String> lastDevices = new java.util.HashSet<>();
 
+    // ================= CONSTRUCTOR =================
     public MainDashboard() {
         initComponents();
-
-        scrcpyService = new ScrcpyService(scrcpyPath);
-        windowManager = new WindowManager();
+        initServices();
+        initUI();
+        initListeners();
         startAutoDeviceWatcher();
-//=================================================================================================
-        setExtendedState(JFrame.MAXIMIZED_BOTH);
-        this.getContentPane().setLayout(new BorderLayout());
-        this.getContentPane().add(panelDevices, BorderLayout.WEST);
-        this.getContentPane().add(panelLayar, BorderLayout.CENTER);
-        panelDevices.setBackground(new Color(245, 246, 250));
-        //panelLayar.setLayout(new GridLayout(0, COLS, GAP, GAP));
-        panelLayar.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-panelLayar.setLayout(new BorderLayout(10, 10));
-        setupStyle();
-        refreshDeviceList();
+        
+    }
 
-        // 🔥 sync saat resize / pindah
-        this.addComponentListener(new ComponentAdapter() {
-            @Override
+    private void initServices() {
+        scrcpyService = new ScrcpyService(scrcpyExecutable);
+        windowManager = new WindowManager();
+    }
+
+    private void initUI() {
+        setExtendedState(JFrame.MAXIMIZED_BOTH);
+        setLayout(new BorderLayout());
+
+        panelDevices.setBackground(new Color(245, 246, 250));
+
+        // 🔥 INI FIX UTAMA
+        panelLayar.setLayout(new GridLayout(0, 3, GAP, GAP));
+        panelLayar.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        setupLogStyle();
+        refreshDeviceList();
+    }
+
+    private void initListeners() {
+        addComponentListener(new ComponentAdapter() {
             public void componentMoved(ComponentEvent e) {
                 updateScrcpyPositions();
             }
 
-            @Override
             public void componentResized(ComponentEvent e) {
                 updateScrcpyPositions();
             }
         });
 
-        // 🔥 sync saat fullscreen / maximize
-        this.addWindowStateListener(e -> {
-            executor.submit(() -> {
-                try {
-                    Thread.sleep(300);
-                    SwingUtilities.invokeLater(() -> updateScrcpyPositions());
-                } catch (Exception ex) {
-                }
-            });
-        });
-
-        // 🔥 AUTO SYNC LOOP (PALING PENTING)
         new javax.swing.Timer(1000, e -> updateScrcpyPositions()).start();
 
-        // 🔥 HANDLE CLOSE (rapi, bukan taskkill brutal)
-        this.addWindowListener(new WindowAdapter() {
-            @Override
+        addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent e) {
-                closeAllScrcpy();
-                executor.shutdownNow();
+                shutdown();
             }
         });
     }
 
+    private void shutdown() {
+        scrcpyService.stopAll();
+        executor.shutdownNow();
+    }
+
     private void runAdbCommand(String command) {
-        try {
-            Runtime.getRuntime().exec(command);
-        } catch (Exception ex) {
-            tulisLog("Gagal: " + ex.getMessage());
+        executor.submit(() -> {
+            try {
+                Process p = Runtime.getRuntime().exec(command);
+
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(p.getInputStream())
+                );
+
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    log(line);
+                }
+
+            } catch (Exception e) {
+                log("Error: " + e.getMessage());
+            }
+        });
+    }
+
+    private void runAdbCommand(String... cmd) {
+        executor.submit(() -> {
+            try {
+                Process p = new ProcessBuilder(cmd).start();
+
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(p.getInputStream())
+                );
+
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    log(line);
+                }
+
+            } catch (Exception e) {
+                log("Error: " + e.getMessage());
+            }
+        });
+    }
+
+    private void connectWifi(String ipAddress) {
+        if (ipAddress == null || ipAddress.trim().isEmpty()) {
+            log("IP kosong.");
+            return;
         }
+
+        executor.submit(() -> {
+            try {
+                Process p = Runtime.getRuntime().exec(adbExecutable + " connect " + ipAddress);
+
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(p.getInputStream())
+                );
+
+                String response = reader.readLine();
+
+                if (response != null && response.contains("connected")) {
+                    log("Berhasil connect: " + ipAddress);
+                    SwingUtilities.invokeLater(this::refreshDeviceList);
+                } else {
+                    log("Gagal connect: " + response);
+                }
+
+            } catch (Exception ex) {
+                log("Error: " + ex.getMessage());
+            }
+        });
     }
 
-    private Rectangle getGridBounds(int index) {
-        Dimension d = panelLayar.getSize();
-
-        int panelWidth = d.width;
-        int panelHeight = d.height;
-
-        if (panelWidth <= 100 || panelHeight <= 100) {
-            return new Rectangle(0, 0, 300, 600);
-        }
-
-        int devicesCount = Math.max(1, Math.max(windowManager.getAll().size(), activeDevices.size()));
-
-        int cellWidth = (panelWidth - ((COLS - 1) * GAP)) / COLS;
-        int rowCount = (int) Math.ceil((double) devicesCount / COLS);
-        int cellHeight = (panelHeight - ((rowCount - 1) * GAP)) / rowCount;
-
-        int col = index % COLS;
-        int row = index / COLS;
-
-        return new Rectangle(
-                col * (cellWidth + GAP),
-                row * (cellHeight + GAP),
-                cellWidth,
-                cellHeight
-        );
-    }
-
-    private void setupStyle() {
-        txtLog.setEditable(false);
-        txtLog.setBackground(Color.BLACK);
-        txtLog.setForeground(new Color(50, 255, 50));
-        txtLog.setFont(new Font("Consolas", Font.PLAIN, 10));
-    }
-
-    // ================= [ CORE MIRRORING ] =================
-    private void startScrcpyMirror(String deviceID) {
-        if (deviceID == null) {
+    // ================= CORE =================
+    private void startScrcpyMirror(String deviceId) {
+        if (deviceId == null) {
             return;
         }
 
@@ -143,39 +167,25 @@ panelLayar.setLayout(new BorderLayout(10, 10));
             index = currentIndex++;
         }
 
-        executor.submit(() -> {
-            try {
-                Point p = panelLayar.getLocationOnScreen();
-                Rectangle r = getGridBounds(index);
+        executor.submit(() -> launchScrcpy(deviceId, index));
+    }
 
-                int padding = 10;
+    private void launchScrcpy(String deviceId, int index) {
+        try {
+            Rectangle bounds = calculateBounds(index);
+            Point base = panelLayar.getLocationOnScreen();
 
-                int targetW = r.width - (padding * 2);
-                int targetH = r.height - (padding * 2);
+            Dimension size = calculateSize(bounds);
 
-                double ratio = 9.0 / 18.0;
+            int x = base.x + bounds.x + center(bounds.width, size.width);
+            int y = base.y + bounds.y + center(bounds.height, size.height);
 
-                int w = targetW;
-                int h = (int) (w / ratio);
+            scrcpyService.start(deviceId, x, y, size.width, size.height);
+            windowManager.register(deviceId);
 
-                if (h > targetH) {
-                    h = targetH;
-                    w = (int) (h * ratio);
-                }
-
-                int x = p.x + r.x + (r.width - w) / 2 + OFFSET_X;
-                int y = p.y + r.y + (r.height - h) / 2 + OFFSET_Y;
-
-                // 🔥 PANGGIL SERVICE
-                scrcpyService.start(deviceID, x, y, w, h);
-
-                // 🔥 REGISTER WINDOW
-                windowManager.register(deviceID);
-
-            } catch (Exception e) {
-                tulisLog("Error: " + e.getMessage());
-            }
-        });
+        } catch (Exception e) {
+            log("Error: " + e.getMessage());
+        }
     }
 
     private void updateScrcpyPositions() {
@@ -185,107 +195,161 @@ panelLayar.setLayout(new BorderLayout(10, 10));
 
         SwingUtilities.invokeLater(() -> {
             try {
+                Point base = panelLayar.getLocationOnScreen();
+                List<String> devices = new ArrayList<>(windowManager.getAll().keySet());
+                Collections.sort(devices);
 
-                Point p = panelLayar.getLocationOnScreen();
-
-                List<String> keys = new ArrayList<>(windowManager.getAll().keySet());
-                java.util.Collections.sort(keys);
-
-                for (int i = 0; i < keys.size(); i++) {
-
-                    String deviceID = keys.get(i);
-
-                    Rectangle r = getGridBounds(i);
-
-                    int padding = 10;
-
-                    int targetW = r.width - (padding * 2);
-                    int targetH = r.height - (padding * 2);
-
-                    double ratio = 9.0 / 18.0;
-
-                    int w = targetW;
-                    int h = (int) (w / ratio);
-
-                    if (h > targetH) {
-                        h = targetH;
-                        w = (int) (h * ratio);
-                    }
-
-                    int x = p.x + r.x + (r.width - w) / 2 + OFFSET_X;
-                    int y = p.y + r.y + (r.height - h) / 2 + OFFSET_Y;
-
-                    // 🔥 INI KUNCI NYA
-                    windowManager.move(deviceID, x, y, w, h);
+                for (int i = 0; i < devices.size(); i++) {
+                    moveWindow(devices.get(i), i, base);
                 }
 
-            } catch (Exception ex) {
-                // amanin saat resize/fullscreen
+            } catch (Exception ignored) {
             }
         });
     }
 
-    private void closeAllScrcpy() {
-        scrcpyService.stopAll();
+    private void moveWindow(String deviceId, int index, Point base) {
+        Rectangle bounds = calculateBounds(index);
+        Dimension size = calculateSize(bounds);
+
+        int x = base.x + bounds.x + center(bounds.width, size.width);
+        int y = base.y + bounds.y + center(bounds.height, size.height);
+
+        windowManager.move(deviceId, x, y, size.width, size.height);
     }
 
-    // ================= [ DEVICE LOGIC ] =================
-    private void refreshDeviceList() {
-        DefaultListModel<String> model = new DefaultListModel<>();
-        List<String> devices = getConnectedDevices();
+    // ================= CALCULATION =================
+    private Rectangle calculateBounds(int index) {
+        Dimension d = panelLayar.getSize();
 
-        for (String id : devices) {
-            model.addElement(id);
-        }
+        int deviceCount = Math.max(1,
+                Math.max(windowManager.getAll().size(), activeDevices.size()));
 
-        jListDevices.setModel(model);
+        int cellW = (d.width - (COLS - 1) * GAP) / COLS;
+        int rows = (int) Math.ceil((double) deviceCount / COLS);
+        int cellH = (d.height - (rows - 1) * GAP) / rows;
 
-        // 🔥 RESET GRID
-        currentIndex = 0;
-        activeDevices.clear();
+        int col = index % COLS;
+        int row = index / COLS;
 
-        // 🔥 KOSONGKAN PANEL DULU
-        panelLayar.removeAll();
-
-        // 🔥 TAMBAH PLACEHOLDER (BIAR KELIHATAN GRID)
-        int totalSlot = Math.max(devices.size(), 3); // minimal 3 slot
-
-        for (int i = 0; i < totalSlot; i++) {
-            JPanel dummy = new JPanel();
-            dummy.setBackground(Color.BLACK);
-            dummy.setBorder(BorderFactory.createLineBorder(Color.WHITE, 0));
-            panelLayar.add(dummy);
-        }
-
-        panelLayar.revalidate();
-        panelLayar.repaint();
-
-        tulisLog("Daftar perangkat diperbarui (" + devices.size() + " ditemukan).");
+        return new Rectangle(
+                col * (cellW + GAP),
+                row * (cellH + GAP),
+                cellW,
+                cellH
+        );
     }
 
+    // 🔥 ANTI KEPOTONG
+    private Dimension calculateSize(Rectangle bounds) {
+        int maxW = bounds.width - (PADDING * 2);
+        int maxH = bounds.height - (PADDING * 2);
+
+        double ratio = 9.0 / 19.5;
+
+        int wByWidth = maxW;
+        int hByWidth = (int) (wByWidth / ratio);
+
+        int hByHeight = maxH;
+        int wByHeight = (int) (hByHeight * ratio);
+
+        int w, h;
+
+        if (hByWidth <= maxH) {
+            w = wByWidth;
+            h = hByWidth;
+        } else {
+            w = wByHeight;
+            h = hByHeight;
+        }
+
+        return new Dimension(w, h);
+    }
+
+    private int center(int container, int content) {
+        return (container - content) / 2;
+    }
+
+    // ================= DEVICE =================
     private List<String> getConnectedDevices() {
         List<String> devices = new ArrayList<>();
+
         try {
-            Process process = Runtime.getRuntime().exec(adbPath + " devices");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            Process p = Runtime.getRuntime().exec(adbExecutable + " devices");
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+
             String line;
-            while ((line = reader.readLine()) != null) {
+            while ((line = r.readLine()) != null) {
                 if (line.endsWith("device")) {
                     devices.add(line.split("\t")[0]);
                 }
             }
+
         } catch (Exception e) {
-            tulisLog("ADB Error: " + e.getMessage());
+            log("ADB Error: " + e.getMessage());
         }
+
         return devices;
     }
 
-    // ================= [ ACTION LISTENERS ] =================
+    private void refreshDeviceList() {
+        List<String> devices = getConnectedDevices();
+
+        DefaultListModel<String> model = new DefaultListModel<>();
+        devices.forEach(model::addElement);
+
+        jListDevices.setModel(model);
+        currentIndex = 0;
+        activeDevices.clear();
+        panelLayar.revalidate();
+        panelLayar.repaint();
+        updateScrcpyPositions();
+        log("Device ditemukan: " + devices.size());
+    }
+
+    // ================= UTIL =================
+    private void log(String msg) {
+        SwingUtilities.invokeLater(() -> {
+            txtLog.append("> " + msg + "\n");
+            txtLog.setCaretPosition(txtLog.getDocument().getLength());
+        });
+    }
+
+    private void setupLogStyle() {
+        txtLog.setEditable(false);
+        txtLog.setBackground(Color.BLACK);
+        txtLog.setForeground(new Color(50, 255, 50));
+        txtLog.setFont(new Font("Consolas", Font.PLAIN, 10));
+    }
+
+    private void startAutoDeviceWatcher() {
+        executor.submit(() -> {
+            while (true) {
+                try {
+                    Set<String> current = new HashSet<>(getConnectedDevices());
+
+                    if (!current.equals(lastDevices)) {
+                        lastDevices.clear();
+                        lastDevices.addAll(current);
+
+                        log("Perubahan device terdeteksi...");
+                        SwingUtilities.invokeLater(this::refreshDeviceList);
+                    }
+
+                    Thread.sleep(2000);
+
+                } catch (Exception e) {
+                    log("Watcher error: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+// ================= [ ACTION LISTENERS ] =================
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
 
-        jOptionPane1 = new javax.swing.JOptionPane();
         panelDevices = new javax.swing.JPanel();
         spLog = new javax.swing.JScrollPane();
         txtLog = new javax.swing.JTextArea();
@@ -309,13 +373,12 @@ panelLayar.setLayout(new BorderLayout(10, 10));
         btnHomeAll = new javax.swing.JButton();
         btnHomeAll.setIcon(new com.formdev.flatlaf.extras.FlatSVGIcon("icons/home.svg"));
         panelLayar = new javax.swing.JPanel();
-        jOptionPane1.getAccessibleContext().setAccessibleParent(this);
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setName("MainFrame"); // NOI18N
 
+        panelDevices.setBackground(new java.awt.Color(255, 255, 255));
         panelDevices.setMinimumSize(new java.awt.Dimension(220, 0));
-        panelDevices.setPreferredSize(new java.awt.Dimension(280, 600));
 
         spLog.setFont(new java.awt.Font("Segoe UI", 0, 8)); // NOI18N
 
@@ -392,13 +455,33 @@ panelLayar.setLayout(new BorderLayout(10, 10));
         panelDevices.setLayout(panelDevicesLayout);
         panelDevicesLayout.setHorizontalGroup(
             panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addComponent(spLog)
             .addGroup(panelDevicesLayout.createSequentialGroup()
                 .addContainerGap()
                 .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(panelDevicesLayout.createSequentialGroup()
+                        .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addComponent(btnScreenshotAll)
+                                    .addGroup(panelDevicesLayout.createSequentialGroup()
+                                        .addComponent(btnRebootAll)
+                                        .addGap(18, 18, 18)
+                                        .addComponent(btnInstallAPK)))
+                                .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addGroup(panelDevicesLayout.createSequentialGroup()
+                                        .addComponent(btnRecentAll)
+                                        .addGap(18, 18, 18)
+                                        .addComponent(btnHomeAll)
+                                        .addGap(18, 18, 18)
+                                        .addComponent(btnBackAll))
+                                    .addComponent(btnSendText)))
+                            .addComponent(chkSync))
+                        .addContainerGap(22, Short.MAX_VALUE))
+                    .addGroup(panelDevicesLayout.createSequentialGroup()
                         .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
                             .addComponent(txtInputMasal, javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(javax.swing.GroupLayout.Alignment.LEADING, panelDevicesLayout.createSequentialGroup()
+                            .addGroup(panelDevicesLayout.createSequentialGroup()
                                 .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
                                     .addComponent(btnConnect, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
                                     .addComponent(spDevices, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, 137, Short.MAX_VALUE))
@@ -407,26 +490,7 @@ panelLayar.setLayout(new BorderLayout(10, 10));
                                     .addComponent(btnUSB, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
                                     .addComponent(btnRefresh, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
                                     .addComponent(btnConnectWiFi, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))))
-                        .addGap(0, 0, Short.MAX_VALUE))
-                    .addGroup(panelDevicesLayout.createSequentialGroup()
-                        .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                            .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                .addComponent(btnScreenshotAll)
-                                .addGroup(panelDevicesLayout.createSequentialGroup()
-                                    .addComponent(btnRebootAll)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(btnInstallAPK)))
-                            .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                .addComponent(chkSync)
-                                .addGroup(panelDevicesLayout.createSequentialGroup()
-                                    .addComponent(btnRecentAll)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(btnHomeAll)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(btnBackAll))
-                                .addComponent(btnSendText)))
-                        .addContainerGap(22, Short.MAX_VALUE))))
-            .addComponent(spLog)
+                        .addGap(0, 0, Short.MAX_VALUE))))
         );
         panelDevicesLayout.setVerticalGroup(
             panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -444,11 +508,11 @@ panelLayar.setLayout(new BorderLayout(10, 10));
                 .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(btnConnect)
                     .addComponent(btnConnectWiFi))
-                .addGap(48, 48, 48)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(chkSync)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(txtInputMasal, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(18, 18, 18)
+                .addGap(60, 60, 60)
                 .addComponent(btnSendText)
                 .addGap(34, 34, 34)
                 .addGroup(panelDevicesLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
@@ -465,8 +529,6 @@ panelLayar.setLayout(new BorderLayout(10, 10));
         );
 
         getContentPane().add(panelDevices, java.awt.BorderLayout.WEST);
-
-        panelLayar.setBackground(new java.awt.Color(255, 255, 255));
 
         javax.swing.GroupLayout panelLayarLayout = new javax.swing.GroupLayout(panelLayar);
         panelLayar.setLayout(panelLayarLayout);
@@ -485,11 +547,48 @@ panelLayar.setLayout(new BorderLayout(10, 10));
     }// </editor-fold>//GEN-END:initComponents
 
     private void btnRecentAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRecentAllActionPerformed
-        runAdbCommand(adbPath + " -s " + jListDevices.getSelectedValue() + " shell input keyevent 187");
+        // 🔹 MODE SYNC (kirim ke semua device)
+        if (chkSync.isSelected()) {
+
+            List<String> devices = getConnectedDevices();
+
+            if (devices.isEmpty()) {
+                log("Tidak ada device terhubung.");
+                return;
+            }
+
+            for (String id : devices) {
+                executor.submit(() -> runAdbCommand(
+                        adbExecutable,
+                        "-s", id,
+                        "shell", "input", "keyevent", "187"
+                ));
+            }
+
+            log("Sync RECENT ke " + devices.size() + " device.");
+
+        } // 🔹 MODE SINGLE DEVICE
+        else {
+
+            String selected = jListDevices.getSelectedValue();
+
+            if (selected == null) {
+                log("Pilih device dulu!");
+                return;
+            }
+
+            runAdbCommand(
+                    adbExecutable,
+                    "-s", selected,
+                    "shell", "input", "keyevent", "187"
+            );
+
+            log("RECENT dikirim ke: " + selected);
+        }
     }//GEN-LAST:event_btnRecentAllActionPerformed
 
     private void btnBackAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnBackAllActionPerformed
-        runAdbCommand(adbPath + " -s " + jListDevices.getSelectedValue() + " shell input keyevent 4");
+        runAdbCommand(adbExecutable + " -s " + jListDevices.getSelectedValue() + " shell input keyevent 4");
     }//GEN-LAST:event_btnBackAllActionPerformed
 
     private void jListDevicesMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_jListDevicesMouseClicked
@@ -503,7 +602,7 @@ panelLayar.setLayout(new BorderLayout(10, 10));
         String selectedID = jListDevices.getSelectedValue();
 
         if (selectedID == null) {
-            tulisLog("Silakan pilih perangkat!");
+            log("Silakan pilih perangkat!");
             return;
         }
 
@@ -517,7 +616,7 @@ panelLayar.setLayout(new BorderLayout(10, 10));
     private void btnScreenshotAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScreenshotAllActionPerformed
         List<String> devices = getConnectedDevices();
         if (devices.isEmpty()) {
-            tulisLog("Gagal: Tidak ada HP terkoneksi.");
+            log("Gagal: Tidak ada HP terkoneksi.");
             return;
         }
 
@@ -528,8 +627,8 @@ panelLayar.setLayout(new BorderLayout(10, 10));
             folder.mkdirs();
         }
 
-        tulisLog("Memulai Screenshot Masal...");
-        tulisLog("Folder simpan: " + folderPath);
+        log("Memulai Screenshot Masal...");
+        log("Folder simpan: " + folderPath);
 
         // 2. Loop semua HP
         for (String id : devices) {
@@ -544,7 +643,7 @@ panelLayar.setLayout(new BorderLayout(10, 10));
 
                     // 3. Eksekusi perintah ADB Screenshot
                     // -p artinya output dalam format PNG
-                    ProcessBuilder pb = new ProcessBuilder(adbPath, "-s", id, "exec-out", "screencap", "-p");
+                    ProcessBuilder pb = new ProcessBuilder(adbExecutable, "-s", id, "exec-out", "screencap", "-p");
                     Process p = pb.start();
 
                     // 4. Simpan output stream langsung menjadi file di PC
@@ -557,15 +656,15 @@ panelLayar.setLayout(new BorderLayout(10, 10));
                         }
                     }
 
-                    tulisLog("[" + id + "] Screenshot Berhasil: " + fileName);
+                    log("[" + id + "] Screenshot Berhasil: " + fileName);
 
                 } catch (Exception e) {
-                    tulisLog("[" + id + "] Gagal Screenshot: " + e.getMessage());
+                    log("[" + id + "] Gagal Screenshot: " + e.getMessage());
                 }
 
             });
         }
-        tulisLog("Screenshot sedang diproses... cek folder.");
+        log("Screenshot sedang diproses... cek folder.");
     }//GEN-LAST:event_btnScreenshotAllActionPerformed
 
     private void btnInstallAPKActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnInstallAPKActionPerformed
@@ -580,48 +679,48 @@ panelLayar.setLayout(new BorderLayout(10, 10));
 
             List<String> devices = getConnectedDevices();
             if (devices.isEmpty()) {
-                tulisLog("Gagal: Tidak ada HP yang terhubung.");
+                log("Gagal: Tidak ada HP yang terhubung.");
                 return;
             }
 
-            tulisLog("Memulai instalasi masal: " + apkFile.getName());
+            log("Memulai instalasi masal: " + apkFile.getName());
 
             for (String id : devices) {
                 executor.submit(() -> {
                     try {
                         // A. Bypass Verifikasi (Seringkali harus dilakukan tepat sebelum install)
-                        runAdbCommand(adbPath + " -s " + id + " shell settings put global verifier_verify_adb_installs 0");
-                        runAdbCommand(adbPath + " -s " + id + " shell settings put global package_verifier_enable 0");
+                        runAdbCommand(adbExecutable + " -s " + id + " shell settings put global verifier_verify_adb_installs 0");
+                        runAdbCommand(adbExecutable + " -s " + id + " shell settings put global package_verifier_enable 0");
 
-                        tulisLog("[" + id + "] Sedang menginstal...");
+                        log("[" + id + "] Sedang menginstal...");
 
                         // B. Gunakan Array String untuk menghindari error spasi pada path
                         // Parameter -r ditambahkan agar bisa menimpa aplikasi lama (reinstall)
-                        String[] cmd = {adbPath, "-s", id, "install", "-r", "-g", apkPath};
+                        String[] cmd = {adbExecutable, "-s", id, "install", "-r", "-g", apkPath};
                         Process p = Runtime.getRuntime().exec(cmd);
 
                         java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()));
                         String line;
                         boolean sukses = false;
                         while ((line = r.readLine()) != null) {
-                            tulisLog("[" + id + " Output]: " + line); // Opsional: Pantau log asli ADB
+                            log("[" + id + " Output]: " + line); // Opsional: Pantau log asli ADB
                             if (line.toLowerCase().contains("success")) {
                                 sukses = true;
                             }
                         }
 
                         if (sukses) {
-                            tulisLog("[" + id + "] BERHASIL diinstal.");
+                            log("[" + id + "] BERHASIL diinstal.");
                         } else {
-                            tulisLog("[" + id + "] GAGAL: Pastikan 'Install via USB' aktif di HP.");
+                            log("[" + id + "] GAGAL: Pastikan 'Install via USB' aktif di HP.");
                         }
 
                     } catch (Exception e) {
-                        tulisLog("[" + id + "] Error: " + e.getMessage());
+                        log("[" + id + "] Error: " + e.getMessage());
                     }
                 });
             }
-            tulisLog("Instalasi berjalan di background...");
+            log("Instalasi berjalan di background...");
         }
     }//GEN-LAST:event_btnInstallAPKActionPerformed
 
@@ -629,14 +728,14 @@ panelLayar.setLayout(new BorderLayout(10, 10));
         // Jalankan di Thread terpisah agar GUI tidak beku
         new Thread(() -> {
             try {
-                tulisLog("Memulai pemindaian jaringan...");
+                log("Memulai pemindaian jaringan...");
 
                 // 1. Dapatkan Prefix IP Laptop (Contoh: 192.168.1.)
                 String myIp = java.net.InetAddress.getLocalHost().getHostAddress();
                 String prefix = myIp.substring(0, myIp.lastIndexOf(".") + 1);
-                String adbPath = basePath + "adb.exe";
+                String adbExecutable = basePath + "adb.exe";
 
-                tulisLog("Segmen jaringan terdeteksi: " + prefix + "0/24");
+                log("Segmen jaringan terdeteksi: " + prefix + "0/24");
 
                 // 2. Gunakan Pool Thread (50 thread sekaligus) agar super cepat
                 java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(50);
@@ -653,13 +752,13 @@ panelLayar.setLayout(new BorderLayout(10, 10));
                                 if (addr.isReachable(800)) {
 
                                     // Gunakan timeout pada level command line agar tidak gantung
-                                    Process p = Runtime.getRuntime().exec(adbPath + " connect " + testIp + ":5555");
+                                    Process p = Runtime.getRuntime().exec(adbExecutable + " connect " + testIp + ":5555");
 
                                     java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()));
                                     String res = r.readLine();
 
                                     if (res != null && (res.contains("connected") || res.contains("already connected"))) {
-                                        tulisLog("DITEMUKAN: " + testIp);
+                                        log("DITEMUKAN: " + testIp);
                                         SwingUtilities.invokeLater(() -> refreshDeviceList());
                                     }
                                 }
@@ -672,28 +771,21 @@ panelLayar.setLayout(new BorderLayout(10, 10));
                 executor.shutdown();
                 // Tunggu sampai semua thread selesai (maksimal 15 detik)
                 if (executor.awaitTermination(15, java.util.concurrent.TimeUnit.SECONDS)) {
-                    tulisLog("Pemindaian selesai.");
+                    log("Pemindaian selesai.");
                 }
 
             } catch (Exception e) {
-                tulisLog("Error Scan: " + e.getMessage());
+                log("Error Scan: " + e.getMessage());
             }
         }).start();
-    }
 
-    private void tulisLog(String pesan) {
-        SwingUtilities.invokeLater(() -> {
-            txtLog.append("> " + pesan + "\n");
-            txtLog.setCaretPosition(txtLog.getDocument().getLength());
-
-        });
     }//GEN-LAST:event_btnUSBActionPerformed
 
     private void btnConnectWiFiActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnConnectWiFiActionPerformed
         String input = txtInputMasal.getText().trim();
 
         if (input.isEmpty()) {
-            tulisLog("Masukkan IP (bisa banyak, pisah koma)");
+            log("Masukkan IP (bisa banyak, pisah koma)");
             return;
         }
 
@@ -713,39 +805,10 @@ panelLayar.setLayout(new BorderLayout(10, 10));
         }
     }//GEN-LAST:event_btnConnectWiFiActionPerformed
 
-    private void connectWifi(String ipAddress) {
-        if (ipAddress == null || ipAddress.trim().isEmpty()) {
-            tulisLog("IP kosong.");
-            return;
-        }
-
-        executor.submit(() -> {
-            try {
-                Process p = Runtime.getRuntime().exec(adbPath + " connect " + ipAddress);
-
-                BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(p.getInputStream())
-                );
-
-                String response = reader.readLine();
-
-                if (response != null && response.contains("connected")) {
-                    tulisLog("Berhasil connect: " + ipAddress);
-                    refreshDeviceList();
-                } else {
-                    tulisLog("Gagal connect: " + response);
-                }
-
-            } catch (Exception ex) {
-                tulisLog("Error: " + ex.getMessage());
-            }
-        });
-    }
-
     private void btnRefreshActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRefreshActionPerformed
         executor.submit(() -> {
             try {
-                closeAllScrcpy();
+                scrcpyService.stopAll();
                 Thread.sleep(800);
                 SwingUtilities.invokeLater(this::refreshDeviceList);
             } catch (Exception e) {
@@ -754,19 +817,43 @@ panelLayar.setLayout(new BorderLayout(10, 10));
     }//GEN-LAST:event_btnRefreshActionPerformed
 
     private void btnHomeAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnHomeAllActionPerformed
+        // 🔹 MODE SYNC (kirim ke semua device)
         if (chkSync.isSelected()) {
-            // Jika centang Sync nyala, kirim ke SEMUA perangkat di list
+
             List<String> devices = getConnectedDevices();
+
+            if (devices.isEmpty()) {
+                log("Tidak ada device terhubung.");
+                return;
+            }
+
             for (String id : devices) {
-                executor.submit(() -> runAdbCommand(adbPath + " -s " + id + " shell input keyevent 3"));
+                executor.submit(() -> runAdbCommand(
+                        adbExecutable,
+                        "-s", id,
+                        "shell", "input", "keyevent", "3"
+                ));
             }
-            tulisLog("Sync Home ke " + devices.size() + " HP.");
-        } else {
-            // Jika tidak, hanya kirim ke yang dipilih di list
+
+            log("Sync HOME ke " + devices.size() + " device.");
+
+        } // 🔹 MODE SINGLE DEVICE
+        else {
+
             String selected = jListDevices.getSelectedValue();
-            if (selected != null) {
-                runAdbCommand(adbPath + " -s " + selected + " shell input keyevent 3");
+
+            if (selected == null) {
+                log("Pilih device dulu!");
+                return;
             }
+
+            runAdbCommand(
+                    adbExecutable,
+                    "-s", selected,
+                    "shell", "input", "keyevent", "3"
+            );
+
+            log("HOME dikirim ke: " + selected);
         }
     }//GEN-LAST:event_btnHomeAllActionPerformed
 
@@ -775,7 +862,7 @@ panelLayar.setLayout(new BorderLayout(10, 10));
 
         // Validasi jika teks kosong
         if (teks.trim().isEmpty()) {
-            tulisLog("Gagal: Teks input kosong.");
+            log("Gagal: Teks input kosong.");
             return;
         }
 
@@ -787,16 +874,16 @@ panelLayar.setLayout(new BorderLayout(10, 10));
             return;
         }
 
-        tulisLog("Mengirim teks: '" + teks + "' ke semua HP...");
+        log("Mengirim teks: '" + teks + "' ke semua HP...");
 
         for (String id : devices) {
             executor.submit(() -> {
                 try {
                     // Perintah 'input text' di Android
-                    runAdbCommand(adbPath + " -s " + id + " shell input text " + teksAdb);
-                    tulisLog("[" + id + "] Teks terkirim.");
+                    runAdbCommand(adbExecutable + " -s " + id + " shell input text " + teksAdb);
+                    log("[" + id + "] Teks terkirim.");
                 } catch (Exception e) {
-                    tulisLog("[" + id + "] Error kirim teks: " + e.getMessage());
+                    log("[" + id + "] Error kirim teks: " + e.getMessage());
                 }
             });
         }
@@ -804,36 +891,6 @@ panelLayar.setLayout(new BorderLayout(10, 10));
         // Kosongkan kotak input setelah kirim agar bersih
         txtInputMasal.setText("");
     }//GEN-LAST:event_btnSendTextActionPerformed
-
-    private void startAutoDeviceWatcher() {
-
-        executor.submit(() -> {
-
-            while (true) {
-                try {
-
-                    List<String> currentDevices = getConnectedDevices();
-                    java.util.Set<String> currentSet = new java.util.HashSet<>(currentDevices);
-
-                    if (!currentSet.equals(lastDevices)) {
-
-                        tulisLog("Perubahan device terdeteksi...");
-                        lastDevices = currentSet;
-
-                        SwingUtilities.invokeLater(() -> {
-                            refreshDeviceList();
-                        });
-                    }
-
-                    Thread.sleep(2000);
-
-                } catch (Exception e) {
-                    tulisLog("Watcher error: " + e.getMessage());
-                }
-            }
-
-        });
-    }
 
     public static void main(String args[]) {
 
@@ -872,7 +929,6 @@ panelLayar.setLayout(new BorderLayout(10, 10));
     private javax.swing.JButton btnUSB;
     private javax.swing.JCheckBox chkSync;
     private javax.swing.JList<String> jListDevices;
-    private javax.swing.JOptionPane jOptionPane1;
     private javax.swing.JPanel panelDevices;
     private javax.swing.JPanel panelLayar;
     private javax.swing.JScrollPane spDevices;
