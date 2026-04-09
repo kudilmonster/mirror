@@ -183,8 +183,8 @@ public class MainDashboard extends JFrame {
                     String windowTitle = "Scrcpy_" + deviceId;
                     scrcpyService.start(deviceId, windowTitle);
 
-                    // 🔥 PANGGIL SERVICE BARU (Super Simple!)
-                    scrcpyService.embed(windowTitle, targetCanvas, this);
+                    // Di dalam MainDashboard.java
+                    scrcpyService.embed(windowTitle, targetCanvas, this, spinX, spinY);
 
                 } catch (Exception e) {
                     log("Error: " + e.getMessage());
@@ -281,7 +281,10 @@ public class MainDashboard extends JFrame {
         btnBackAll.setIcon(new com.formdev.flatlaf.extras.FlatSVGIcon("icons/backspace.svg"));
         panelTopBar = new javax.swing.JPanel();
         jLabel1 = new javax.swing.JLabel();
+        spinX = new javax.swing.JSpinner();
+        spinY = new javax.swing.JSpinner();
         jLabel2 = new javax.swing.JLabel();
+        jLabel3 = new javax.swing.JLabel();
         panelLayar = new javax.swing.JPanel();
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
@@ -516,11 +519,16 @@ public class MainDashboard extends JFrame {
         jLabel1.setFont(new java.awt.Font("Segoe UI", 0, 18)); // NOI18N
         jLabel1.setForeground(new java.awt.Color(255, 255, 255));
         jLabel1.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-        jLabel1.setText("Mirror Dashboard");
+        jLabel1.setText("kunyuk.pro");
         jLabel1.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
 
+        jLabel2.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
         jLabel2.setForeground(new java.awt.Color(255, 255, 255));
-        jLabel2.setText("🟢 0 Devices");
+        jLabel2.setText("X");
+
+        jLabel3.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
+        jLabel3.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel3.setText("Y");
 
         javax.swing.GroupLayout panelTopBarLayout = new javax.swing.GroupLayout(panelTopBar);
         panelTopBar.setLayout(panelTopBarLayout);
@@ -528,19 +536,27 @@ public class MainDashboard extends JFrame {
             panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelTopBarLayout.createSequentialGroup()
                 .addContainerGap()
-                .addComponent(jLabel2)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 366, Short.MAX_VALUE)
                 .addComponent(jLabel1)
-                .addGap(422, 422, 422))
+                .addGap(84, 84, 84)
+                .addComponent(jLabel2)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(3, 3, 3)
+                .addComponent(jLabel3)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(660, Short.MAX_VALUE))
         );
         panelTopBarLayout.setVerticalGroup(
             panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelTopBarLayout.createSequentialGroup()
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addGroup(panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                .addGroup(panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(jLabel1)
-                    .addComponent(jLabel2))
-                .addGap(18, 18, 18))
+                    .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(jLabel2)
+                    .addComponent(jLabel3))
+                .addGap(0, 4, Short.MAX_VALUE))
         );
 
         getContentPane().add(panelTopBar, java.awt.BorderLayout.NORTH);
@@ -695,6 +711,7 @@ public class MainDashboard extends JFrame {
     private javax.swing.JCheckBox chkSync;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel2;
+    private javax.swing.JLabel jLabel3;
     private javax.swing.JList<String> jListDevices;
     private javax.swing.JPanel panelBulk;
     private javax.swing.JPanel panelControl;
@@ -705,6 +722,8 @@ public class MainDashboard extends JFrame {
     private javax.swing.JPanel panelTopBar;
     private javax.swing.JScrollPane spDevices;
     private javax.swing.JScrollPane spLog;
+    private javax.swing.JSpinner spinX;
+    private javax.swing.JSpinner spinY;
     private javax.swing.JTextField txtInputMasal;
     private javax.swing.JTextArea txtLog;
     // End of variables declaration//GEN-END:variables

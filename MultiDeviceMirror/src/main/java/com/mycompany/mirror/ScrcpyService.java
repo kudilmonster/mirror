@@ -3,6 +3,8 @@ package com.mycompany.mirror;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import javax.swing.JSpinner;
+import javax.swing.event.ChangeListener;
 
 public class ScrcpyService {
 
@@ -74,63 +76,75 @@ public class ScrcpyService {
         System.out.println("[SCRCPY] " + msg);
     }
 
+// ==========================================================
+    // JNA EMBEDDING LOGIC (FIX SPINNER & SCOPE ERROR)
     // ==========================================================
-    // JNA EMBEDDING LOGIC (PINDAHAN DARI MAIN DASHBOARD)
-    // ==========================================================
-    public void embed(String windowTitle, java.awt.Canvas canvas, MainDashboard dashboard) {
+    public void embed(String windowTitle, java.awt.Canvas canvas, MainDashboard dashboard, javax.swing.JSpinner spinX, javax.swing.JSpinner spinY) {
         new Thread(() -> {
-            com.sun.jna.platform.win32.WinDef.HWND scrcpyHwnd = null;
+            com.sun.jna.platform.win32.WinDef.HWND foundHwnd = null;
             int retries = 0;
 
             // 1. Cari jendela Scrcpy
-            while (scrcpyHwnd == null && retries < 20) {
+            while (foundHwnd == null && retries < 20) {
                 try {
                     Thread.sleep(500);
-                    scrcpyHwnd = com.sun.jna.platform.win32.User32.INSTANCE.FindWindow(null, windowTitle);
+                    foundHwnd = com.sun.jna.platform.win32.User32.INSTANCE.FindWindow(null, windowTitle);
                     retries++;
                 } catch (InterruptedException e) {
                 }
             }
 
-            if (scrcpyHwnd != null) {
-                // Tunggu render OpenGL stabil
+            if (foundHwnd != null) {
                 try {
                     Thread.sleep(1500);
                 } catch (InterruptedException e) {
                 }
 
+                // Deklarasikan sebagai final agar bisa diakses di dalam Lambda/Runnable
+                final com.sun.jna.platform.win32.WinDef.HWND finalHwnd = foundHwnd;
                 com.sun.jna.platform.win32.WinDef.HWND canvasHwnd = new com.sun.jna.platform.win32.WinDef.HWND(com.sun.jna.Native.getComponentPointer(canvas));
 
-                // 2. Modifikasi Style Jendela (Hapus Border, jadikan Child)
-                int style = com.sun.jna.platform.win32.User32.INSTANCE.GetWindowLong(scrcpyHwnd, com.sun.jna.platform.win32.WinUser.GWL_STYLE);
+                // 2. Setup Style Jendela
+                int style = com.sun.jna.platform.win32.User32.INSTANCE.GetWindowLong(finalHwnd, com.sun.jna.platform.win32.WinUser.GWL_STYLE);
                 style = style & ~com.sun.jna.platform.win32.WinUser.WS_POPUP & ~com.sun.jna.platform.win32.WinUser.WS_CAPTION & ~com.sun.jna.platform.win32.WinUser.WS_THICKFRAME;
                 style = style | com.sun.jna.platform.win32.WinUser.WS_CHILD | com.sun.jna.platform.win32.WinUser.WS_VISIBLE;
 
-                com.sun.jna.platform.win32.User32.INSTANCE.SetWindowLong(scrcpyHwnd, com.sun.jna.platform.win32.WinUser.GWL_STYLE, style);
-                com.sun.jna.platform.win32.User32.INSTANCE.SetParent(scrcpyHwnd, canvasHwnd);
-                com.sun.jna.platform.win32.User32.INSTANCE.ShowWindow(scrcpyHwnd, com.sun.jna.platform.win32.WinUser.SW_SHOW);
+                com.sun.jna.platform.win32.User32.INSTANCE.SetWindowLong(finalHwnd, com.sun.jna.platform.win32.WinUser.GWL_STYLE, style);
+                com.sun.jna.platform.win32.User32.INSTANCE.SetParent(finalHwnd, canvasHwnd);
+                com.sun.jna.platform.win32.User32.INSTANCE.ShowWindow(finalHwnd, com.sun.jna.platform.win32.WinUser.SW_SHOW);
 
-                final com.sun.jna.platform.win32.WinDef.HWND finalHwnd = scrcpyHwnd;
-
-                // 3. Logika Resize Proporsional (Anti-Gepeng)
+                // 3. Logika Resize & Manual Offset
                 Runnable doResize = () -> {
                     int canvasW = canvas.getWidth();
                     int canvasH = canvas.getHeight();
                     if (canvasW > 10 && canvasH > 10) {
-                        double ratio = 9.5 / 19.5;
+                        double ratio = 9.0 / 19.5;
                         int targetW = canvasW;
                         int targetH = (int) (targetW / ratio);
                         if (targetH > canvasH) {
                             targetH = canvasH;
                             targetW = (int) (targetH * ratio);
                         }
-                        int x = (canvasW - targetW) / 2;
-                        int y = (canvasH - targetH) / 2;
-                        com.sun.jna.platform.win32.User32.INSTANCE.MoveWindow(finalHwnd, x, y, targetW, targetH, true);
+
+                        // Ambil nilai dari spinner (Manual Adjustment)
+                        int offX = (int) spinX.getValue();
+                        int offY = (int) spinY.getValue();
+
+                        int x = ((canvasW - targetW) / 2) + offX;
+                        int y = ((canvasH - targetH) / 2) + offY;
+
+                        com.sun.jna.platform.win32.User32.INSTANCE.SetWindowPos(
+                                finalHwnd, null, x, y, targetW, targetH,
+                                com.sun.jna.platform.win32.WinUser.SWP_NOZORDER | com.sun.jna.platform.win32.WinUser.SWP_SHOWWINDOW
+                        );
                     }
                 };
 
-                // Pasang listener agar otomatis resize saat dashboard ditarik
+                // 🔥 Tambahkan Listener ke Spinner agar posisi update saat angka diklik
+                javax.swing.event.ChangeListener spinnerListener = e -> doResize.run();
+                spinX.addChangeListener(spinnerListener);
+                spinY.addChangeListener(spinnerListener);
+
                 canvas.addComponentListener(new java.awt.event.ComponentAdapter() {
                     @Override
                     public void componentResized(java.awt.event.ComponentEvent e) {
@@ -138,18 +152,10 @@ public class ScrcpyService {
                     }
                 });
 
-                // Paksa refresh ukuran di awal
-                for (int i = 0; i < 5; i++) {
-                    doResize.run();
-                    try {
-                        Thread.sleep(300);
-                    } catch (Exception e) {
-                    }
-                }
+                // Jalankan resize pertama kali
+                javax.swing.SwingUtilities.invokeLater(doResize);
 
-                dashboard.log("Berhasil menanamkan Scrcpy: " + windowTitle);
-            } else {
-                dashboard.log("Gagal: Jendela " + windowTitle + " tidak muncul.");
+                dashboard.log("Berhasil embed & sinkron spinner: " + windowTitle);
             }
         }).start();
     }
