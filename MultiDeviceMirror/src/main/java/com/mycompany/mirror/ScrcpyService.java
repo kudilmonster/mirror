@@ -1,119 +1,95 @@
 package com.mycompany.mirror;
 
-import java.io.IOException;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import javax.swing.JSpinner;
-import javax.swing.event.ChangeListener;
+import java.io.*;
+import java.util.*;
+import java.util.concurrent.*;
+import javax.swing.*;
 
 public class ScrcpyService {
 
-    private final String scrcpyPath;
+    private final String executable; // Path ke scrcpy.exe
+    private final ExecutorService executor; // Untuk menjalankan di background
+    private final MainDashboard dashboard; // Untuk kirim log ke UI
+    private final Map<String, Process> runningProcesses = new ConcurrentHashMap<>();
 
-    // Map untuk melacak proses scrcpy yang sedang berjalan agar bisa dimatikan nanti
-    private Map<String, Process> processes = new ConcurrentHashMap<>();
-
-    public ScrcpyService(String scrcpyPath) {
-        this.scrcpyPath = scrcpyPath;
+    // 🔥 Constructor baru: Menerima data dari MainDashboard
+    public ScrcpyService(String executable, ExecutorService executor, MainDashboard dashboard) {
+        this.executable = executable;
+        this.executor = executor;
+        this.dashboard = dashboard;
     }
 
-    // Parameter x, y, w, h dihapus karena posisi & ukuran sudah di-handle oleh JNA (Canvas)
-    public void start(String deviceID, String windowTitle) {
-        if (deviceID == null || deviceID.isEmpty()) {
-            return;
-        }
+public void start(String deviceId, String windowTitle) {
+        executor.submit(() -> {
+            try {
+                int randomPort = 20000 + new Random().nextInt(5000);
 
-        if (processes.containsKey(deviceID)) {
-            log("Sudah jalan: " + deviceID);
-            return;
-        }
+                // Gunakan parameter yang paling dasar tapi efektif
+ProcessBuilder pb = new ProcessBuilder(
+    executable,
+    "-s", deviceId,
+    "--window-title", windowTitle,
+    "--always-on-top",
+    "--no-audio",
+    "--port", String.valueOf(randomPort),
+    
+    // 🔥 SETELAN DIET EKSTREM (SUPER RINGAN)
+    "--max-size", "480",              // 1. Turunkan ke 480p (Sangat direkomendasikan untuk layar duplikat yang ukurannya kecil di UI)
+    "--video-bit-rate", "1M",         // 2. 1 Mbps sudah lebih dari cukup untuk 480p
+    "--max-fps", "15",                // 3. 15-20 FPS. Agak kaku, tapi PC Anda akan sangat berterima kasih.
+    "--no-key-repeat",                // 4. Mencegah spam input
+    "--no-clipboard-autosync"        // 5. Matikan auto-sync copy-paste antara HP dan PC (mengurangi proses background)
+    //"--turn-screen-off"               // 6. Matikan layar fisik HP saat di-mirror (Mencegah HP panas/throttling yang bikin lag)
+);
 
-        // Tidak perlu "new Thread" lagi karena di MainDashboard sudah dibungkus executor.submit()
-        try {
-            // 🔥 Injeksi setingan JNA & Low Graphics (Bot Farm Mode)
-            ProcessBuilder pb = new ProcessBuilder(
-                    scrcpyPath,
-                    "-s", deviceID,
-                    "--window-title", windowTitle, // Judul wajib untuk ditangkap JNA
-                    "--window-borderless",
-                    "-m", "800", // Resolusi maksimal 800px
-                    "-b", "2M", // Bitrate 2 Mbps
-                    "--max-fps", "30", // Kunci di 30 FPS
-                    "--no-audio" // Matikan suara
-            );
+                // Hapus baris --encoder karena itu penyebab utamanya
+                
+                Process p = pb.start();
+                runningProcesses.put(windowTitle, p);
 
-            Process p = pb.start();
-            processes.put(deviceID, p); // Daftarkan proses ke dalam Map
+                dashboard.log("Memulai instance: " + windowTitle + " (Mode Hemat)");
 
-            log("Start scrcpy: " + deviceID);
-
-        } catch (IOException e) {
-            log("Error start: " + e.getMessage());
-        }
+            } catch (Exception e) {
+                dashboard.log("Gagal menjalankan Scrcpy: " + e.getMessage());
+            }
+        });
     }
 
     public void stopAll() {
-        for (Process p : processes.values()) {
-            try {
-                p.destroy(); // Paksa tutup scrcpy.exe dari background Windows
-            } catch (Exception ignored) {
-            }
-        }
-        processes.clear();
-        log("Semua proses Scrcpy telah dimatikan.");
+        runningProcesses.values().forEach(Process::destroy);
+        runningProcesses.clear();
     }
 
-    // Fitur tambahan jika nanti kamu mau bikin tombol "Disconnect" per-HP
-    public void stopDevice(String deviceID) {
-        Process p = processes.remove(deviceID);
-        if (p != null) {
-            p.destroy();
-            log("Stop scrcpy: " + deviceID);
-        }
-    }
-
-    private void log(String msg) {
-        System.out.println("[SCRCPY] " + msg);
-    }
-
-// ==========================================================
-    // JNA EMBEDDING LOGIC (FIX SPINNER & SCOPE ERROR)
     // ==========================================================
-    public void embed(String windowTitle, java.awt.Canvas canvas, MainDashboard dashboard, javax.swing.JSpinner spinX, javax.swing.JSpinner spinY) {
+    // JNA EMBEDDING LOGIC (PINDAHAN DARI MAIN DASHBOARD)
+    // ==========================================================
+    public void embed(String windowTitle, java.awt.Canvas canvas, MainDashboard dashboard, JSpinner spinX, JSpinner spinY) {
         new Thread(() -> {
             com.sun.jna.platform.win32.WinDef.HWND foundHwnd = null;
             int retries = 0;
 
-            // 1. Cari jendela Scrcpy
             while (foundHwnd == null && retries < 20) {
                 try {
-                    Thread.sleep(500);
+                    Thread.sleep(600); // Beri jeda sedikit lebih lama agar OS sempat render
                     foundHwnd = com.sun.jna.platform.win32.User32.INSTANCE.FindWindow(null, windowTitle);
                     retries++;
-                } catch (InterruptedException e) {
-                }
+                } catch (InterruptedException e) {}
             }
 
             if (foundHwnd != null) {
-                try {
-                    Thread.sleep(1500);
-                } catch (InterruptedException e) {
-                }
+                try { Thread.sleep(1000); } catch (InterruptedException e) {}
 
-                // Deklarasikan sebagai final agar bisa diakses di dalam Lambda/Runnable
                 final com.sun.jna.platform.win32.WinDef.HWND finalHwnd = foundHwnd;
                 com.sun.jna.platform.win32.WinDef.HWND canvasHwnd = new com.sun.jna.platform.win32.WinDef.HWND(com.sun.jna.Native.getComponentPointer(canvas));
 
-                // 2. Setup Style Jendela
                 int style = com.sun.jna.platform.win32.User32.INSTANCE.GetWindowLong(finalHwnd, com.sun.jna.platform.win32.WinUser.GWL_STYLE);
                 style = style & ~com.sun.jna.platform.win32.WinUser.WS_POPUP & ~com.sun.jna.platform.win32.WinUser.WS_CAPTION & ~com.sun.jna.platform.win32.WinUser.WS_THICKFRAME;
                 style = style | com.sun.jna.platform.win32.WinUser.WS_CHILD | com.sun.jna.platform.win32.WinUser.WS_VISIBLE;
-
+                
                 com.sun.jna.platform.win32.User32.INSTANCE.SetWindowLong(finalHwnd, com.sun.jna.platform.win32.WinUser.GWL_STYLE, style);
                 com.sun.jna.platform.win32.User32.INSTANCE.SetParent(finalHwnd, canvasHwnd);
                 com.sun.jna.platform.win32.User32.INSTANCE.ShowWindow(finalHwnd, com.sun.jna.platform.win32.WinUser.SW_SHOW);
 
-                // 3. Logika Resize & Manual Offset
                 Runnable doResize = () -> {
                     int canvasW = canvas.getWidth();
                     int canvasH = canvas.getHeight();
@@ -126,36 +102,25 @@ public class ScrcpyService {
                             targetW = (int) (targetH * ratio);
                         }
 
-                        // Ambil nilai dari spinner (Manual Adjustment)
                         int offX = (int) spinX.getValue();
                         int offY = (int) spinY.getValue();
-
                         int x = ((canvasW - targetW) / 2) + offX;
                         int y = ((canvasH - targetH) / 2) + offY;
 
-                        com.sun.jna.platform.win32.User32.INSTANCE.SetWindowPos(
-                                finalHwnd, null, x, y, targetW, targetH,
-                                com.sun.jna.platform.win32.WinUser.SWP_NOZORDER | com.sun.jna.platform.win32.WinUser.SWP_SHOWWINDOW
-                        );
+                        com.sun.jna.platform.win32.User32.INSTANCE.SetWindowPos(finalHwnd, null, x, y, targetW, targetH, 0x0040);
                     }
                 };
 
-                // 🔥 Tambahkan Listener ke Spinner agar posisi update saat angka diklik
-                javax.swing.event.ChangeListener spinnerListener = e -> doResize.run();
-                spinX.addChangeListener(spinnerListener);
-                spinY.addChangeListener(spinnerListener);
-
+                spinX.addChangeListener(e -> doResize.run());
+                spinY.addChangeListener(e -> doResize.run());
                 canvas.addComponentListener(new java.awt.event.ComponentAdapter() {
-                    @Override
-                    public void componentResized(java.awt.event.ComponentEvent e) {
-                        doResize.run();
-                    }
+                    @Override public void componentResized(java.awt.event.ComponentEvent e) { doResize.run(); }
                 });
 
-                // Jalankan resize pertama kali
-                javax.swing.SwingUtilities.invokeLater(doResize);
-
-                dashboard.log("Berhasil embed & sinkron spinner: " + windowTitle);
+                SwingUtilities.invokeLater(doResize);
+                dashboard.log("✅ Berhasil embed ke Slot: " + windowTitle);
+            } else {
+                dashboard.log("❌ Gagal: Jendela Scrcpy " + windowTitle + " tidak ditemukan.");
             }
         }).start();
     }
