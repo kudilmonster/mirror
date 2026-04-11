@@ -14,7 +14,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 
 public class MainDashboard extends JFrame {
 
-    private int nextSlotIndex = 0;
+    //private int nextSlotIndex = 0;
     // ================= CONFIG =================
     
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
@@ -39,14 +39,12 @@ public class MainDashboard extends JFrame {
         initUI();
         startAutoDeviceWatcher();
     }
-
     private void initServices() {
 
         scrcpyService = new ScrcpyService(scrcpyExecutable, executor, this);
         adbService = new AdbService(this, adbExecutable, executor); // 🔥 INISIALISASI ADB
         syncService = new SyncService(this, panelLayar, chkSync); // INISIALISASI SYNC
     }
-
     private void initUI() {
         // Bersihkan layout bawaan NetBeans
         getContentPane().removeAll();
@@ -102,14 +100,12 @@ public class MainDashboard extends JFrame {
             }
         });
     }
-
     //===================================
     private void shutdown() {
         scrcpyService.stopAll();
         executor.shutdownNow();
     }
-
-// ==========================================================
+    // ==========================================================
     // DYNAMIC GRID MAKER
     // ==========================================================
     private void syncGridPanels(int requiredCount) {
@@ -135,7 +131,6 @@ public class MainDashboard extends JFrame {
         panelLayar.revalidate();
         panelLayar.repaint();
     }
-
     // ==========================================================
     // CORE MIRROR: Sekarang mendukung Duplikasi (Multi-Instance)
     // ==========================================================
@@ -197,7 +192,6 @@ public class MainDashboard extends JFrame {
             });
         });
     }
-
     // ==========================================================
     // FITUR DUPLIKAT: Membuka HP yang sama di slot baru
     // ==========================================================
@@ -262,7 +256,6 @@ public class MainDashboard extends JFrame {
             });
         });
     }
-
     public void refreshDeviceList() {
 // 🔥 FIX: Panggil melalui adbService
         List<String> devices = adbService.getConnectedDevices();
@@ -276,7 +269,6 @@ public class MainDashboard extends JFrame {
         panelLayar.repaint();
         log("Device ditemukan: " + devices.size());
     }
-
     // ================= UTIL =================
     public void log(String msg) {
         SwingUtilities.invokeLater(() -> {
@@ -284,14 +276,12 @@ public class MainDashboard extends JFrame {
             txtLog.setCaretPosition(txtLog.getDocument().getLength());
         });
     }
-
     private void setupLogStyle() {
         txtLog.setEditable(false);
         txtLog.setBackground(Color.BLACK);
         txtLog.setForeground(new Color(50, 255, 50));
         txtLog.setFont(new Font("Consolas", Font.PLAIN, 10));
     }
-
     private void startAutoDeviceWatcher() {
         executor.submit(() -> {
             while (true) {
