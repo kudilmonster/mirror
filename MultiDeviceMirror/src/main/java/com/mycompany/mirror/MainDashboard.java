@@ -16,10 +16,9 @@ public class MainDashboard extends JFrame {
 
     //private int nextSlotIndex = 0;
     // ================= CONFIG =================
-    
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
     private final String scrcpyExecutable = basePath + "scrcpy.exe";
-    public final String adbExecutable = basePath + "adb.exe";     
+    public final String adbExecutable = basePath + "adb.exe";
     //==================================================
     private ScrcpyService scrcpyService;
     private SyncService syncService;
@@ -30,6 +29,8 @@ public class MainDashboard extends JFrame {
     private final Set<String> lastDevices = new HashSet<>();
     // Tambahkan ini untuk mengunci HP ke slot spesifik
     private final Map<String, Integer> deviceSlotMap = new HashMap<>();
+    // Tambahkan ini di bawah deviceSlotMap
+    private final Map<Integer, String> slotProcessMap = new HashMap<>();
     public final ExecutorService executor = Executors.newFixedThreadPool(10);
 
     // ================= CONSTRUCTOR =================
@@ -39,12 +40,14 @@ public class MainDashboard extends JFrame {
         initUI();
         startAutoDeviceWatcher();
     }
+
     private void initServices() {
 
         scrcpyService = new ScrcpyService(scrcpyExecutable, executor, this);
         adbService = new AdbService(this, adbExecutable, executor); // 🔥 INISIALISASI ADB
         syncService = new SyncService(this, panelLayar, chkSync); // INISIALISASI SYNC
     }
+
     private void initUI() {
         // Bersihkan layout bawaan NetBeans
         getContentPane().removeAll();
@@ -62,10 +65,10 @@ public class MainDashboard extends JFrame {
         getContentPane().add(scrollLayar, BorderLayout.CENTER);  // Masukkan ScrollPane ke tengah, bukan panelLayar langsung
 
         // Styling sisa panel
-        panelDevices.setBackground(Color.LIGHT_GRAY);
-        panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 1));
+        panelDevices.setBackground(Color.DARK_GRAY);
+        //panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 1));
 
-        panelLayar.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        //panelLayar.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         panelLayar.setBackground(Color.LIGHT_GRAY);
 
         setupLogStyle();
@@ -100,38 +103,165 @@ public class MainDashboard extends JFrame {
             }
         });
     }
+
     //===================================
     private void shutdown() {
         scrcpyService.stopAll();
         executor.shutdownNow();
     }
+// ==========================================================
+    // METHOD UNTUK MENUTUP SLOT TERTENTU (FIXED)
     // ==========================================================
-    // DYNAMIC GRID MAKER
+    private void closeSlot(int targetIndex) {
+        String windowTitle = slotProcessMap.get(targetIndex);
+        
+        // 1. Matikan proses spesifik lewat Taskkill menggunakan ProcessBuilder
+        if (windowTitle != null) {
+            try {
+                // 🔥 FIX 1: Gunakan ProcessBuilder agar string CMD tidak berantakan
+                ProcessBuilder pb = new ProcessBuilder("taskkill", "/F", "/T", "/FI", "WINDOWTITLE eq " + windowTitle);
+                pb.start();
+                log("Slot " + targetIndex + " ditutup (" + windowTitle + ")");
+            } catch (Exception e) {
+                log("Gagal mematikan proses: " + e.getMessage());
+            }
+        }
+
+        // 2. Bersihkan dari Map memori
+        slotProcessMap.remove(targetIndex);
+        String keyToRemove = null;
+        for (Map.Entry<String, Integer> entry : deviceSlotMap.entrySet()) {
+            if (entry.getValue() == targetIndex) {
+                keyToRemove = entry.getKey();
+                break;
+            }
+        }
+        if (keyToRemove != null) {
+            deviceSlotMap.remove(keyToRemove);
+        }
+
+        // 3. Reset UI secara menyeluruh
+        if (targetIndex < panelLayar.getComponentCount()) {
+            JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
+            Component canvasToRemove = null;
+
+            for (Component c : cell.getComponents()) {
+                if (c instanceof JPanel) { 
+                    // Reset Label di Header Panel
+                    for (Component hc : ((JPanel) c).getComponents()) {
+                        if (hc instanceof JLabel) {
+                            ((JLabel) hc).setText("Slot Kosong");
+                        }
+                    }
+                } else if (c instanceof Canvas) {
+                    canvasToRemove = c; // Tandai canvas yang lama
+                }
+            }
+
+// 🔥 FIX: Cabut Canvas lama dan pasang yang baru dengan ukuran yang sama
+            if (canvasToRemove != null) {
+                // Simpan ukuran layar lama sebelum dihancurkan
+                java.awt.Dimension oldSize = canvasToRemove.getSize(); 
+                
+                cell.remove(canvasToRemove);
+                
+                Canvas freshCanvas = new Canvas();
+                freshCanvas.setBackground(java.awt.Color.BLACK);
+                
+                // Gunakan ukuran lama agar kotak tidak menciut
+                if (oldSize.width > 0 && oldSize.height > 0) {
+                    freshCanvas.setPreferredSize(oldSize);
+                } else {
+                    freshCanvas.setPreferredSize(new java.awt.Dimension(320, 584));
+                }
+                
+                cell.add(freshCanvas, java.awt.BorderLayout.CENTER);
+            }
+            
+            // Refresh layout utama
+            panelLayar.revalidate();
+            panelLayar.repaint();
+            
+        }
+    }
+
+// ==========================================================
+    // DYNAMIC GRID MAKER (FIXED SCROLLBAR & ANTI MENGKERUT)
     // ==========================================================
     private void syncGridPanels(int requiredCount) {
         int currentCount = panelLayar.getComponentCount();
+        panelLayar.setLayout(new java.awt.GridLayout(0, 4, 10, 10)); // Tetap 3 kolom
 
-        // 🔥 Kunci permanen di 3 kolom
-        panelLayar.setLayout(new java.awt.GridLayout(0, 3, 10, 10));
+        // Patokan ukuran tinggi HP (Header + Layar)
+        int tinggiHP = 560; 
 
         if (currentCount < requiredCount) {
             for (int i = currentCount; i < requiredCount; i++) {
+                final int slotIndex = i; 
+                
                 JPanel cell = new JPanel(new java.awt.BorderLayout());
                 cell.setBackground(java.awt.Color.BLACK);
                 cell.setBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(50, 50, 50)));
 
+                // --- HEADER PANEL DENGAN TOMBOL CLOSE ---
+                JPanel headerPanel = new JPanel(new java.awt.BorderLayout());
+                headerPanel.setBackground(new java.awt.Color(30, 30, 30));
+                
+                JLabel lblTitle = new JLabel("Slot Kosong");
+                lblTitle.setForeground(java.awt.Color.WHITE);
+                lblTitle.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 5, 2, 0));
+                lblTitle.setFont(new java.awt.Font("Segoe UI", java.awt.Font.BOLD, 11));
+                
+                JButton btnClose = new JButton("X");
+                btnClose.setBackground(new java.awt.Color(200, 50, 50));
+                btnClose.setForeground(java.awt.Color.WHITE);
+                btnClose.setFocusPainted(false);
+                btnClose.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 10, 2, 10));
+                btnClose.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+                btnClose.addActionListener(e -> closeSlot(slotIndex));
+
+                headerPanel.add(lblTitle, java.awt.BorderLayout.CENTER);
+                headerPanel.add(btnClose, java.awt.BorderLayout.EAST);
+
                 java.awt.Canvas c = new java.awt.Canvas();
                 c.setBackground(java.awt.Color.BLACK);
+                
+                cell.add(headerPanel, java.awt.BorderLayout.NORTH);
                 cell.add(c, java.awt.BorderLayout.CENTER);
 
                 panelLayar.add(cell);
             }
         }
 
+        // 🔥 FIX PAMUNGKAS: Paksa JScrollPane membaca tinggi baru!
+        int totalKotak = panelLayar.getComponentCount();
+        
+        // Rumus matematika: jika kotak 1-3 = 1 baris, 4-6 = 2 baris, dst.
+        int jumlahBaris = (totalKotak + 2) / 4; 
+        
+        // Hitung total tinggi pixel yang dibutuhkan agar layar tidak tergencet
+        int totalTinggiDibutuhkan = (jumlahBaris * tinggiHP) + ((jumlahBaris + 1) * 10);
+        
+        // Ambil lebar saat ini agar lebarnya tidak rusak
+        int lebarSaatIni = panelLayar.getParent() != null ? panelLayar.getParent().getWidth() : 800;
+        if (lebarSaatIni == 0) lebarSaatIni = 800; // Pencegahan jika UI belum selesai render
+
+        // Kunci secara paksa ukuran panelLayar
+        panelLayar.setPreferredSize(new java.awt.Dimension(lebarSaatIni, totalTinggiDibutuhkan));
+        
+        // Wajib revalidate 3 lapis agar Scrollbar-nya "bangun"
         panelLayar.revalidate();
         panelLayar.repaint();
+        
+        if (panelLayar.getParent() instanceof javax.swing.JViewport) {
+            javax.swing.JViewport vp = (javax.swing.JViewport) panelLayar.getParent();
+            vp.revalidate(); 
+            if (vp.getParent() != null) {
+                vp.getParent().revalidate(); // Ini adalah JScrollPane-nya!
+            }
+        }
     }
-    // ==========================================================
+    
     // CORE MIRROR: Sekarang mendukung Duplikasi (Multi-Instance)
     // ==========================================================
     private void startScrcpyMirror(String deviceId, boolean isClone) {
@@ -168,14 +298,18 @@ public class MainDashboard extends JFrame {
 
             // Ambil Canvas dari kotak target
             JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            Canvas targetCanvas = (Canvas) cell.getComponent(0);
+            JPanel header = (JPanel) cell.getComponent(0);
+            JLabel lblTitle = (JLabel) header.getComponent(0);
+            lblTitle.setText(deviceId + (isClone ? " (Clone)" : "")); // Ubah judul layar
+
+            Canvas targetCanvas = (Canvas) cell.getComponent(1); // <--- Sekarang Canvas ada di index 1
 
             // 4. Jalankan Scrcpy di background thread
             executor.submit(() -> {
                 try {
                     // Berikan judul jendela yang unik dan mudah dicari
                     String windowTitle = "Mirror_" + targetIndex + "_" + (isClone ? "CLONE" : "ORIG");
-
+                    slotProcessMap.put(targetIndex, windowTitle);
                     // Start Scrcpy (dengan port unik)
                     scrcpyService.start(deviceId, windowTitle);
 
@@ -192,6 +326,7 @@ public class MainDashboard extends JFrame {
             });
         });
     }
+
     // ==========================================================
     // FITUR DUPLIKAT: Membuka HP yang sama di slot baru
     // ==========================================================
@@ -236,19 +371,24 @@ public class MainDashboard extends JFrame {
             syncGridPanels(targetIndex + 1);
 
             JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            Canvas targetCanvas = (Canvas) cell.getComponent(0);
+            JPanel header = (JPanel) cell.getComponent(0);
+            JLabel lblTitle = (JLabel) header.getComponent(0);
+            lblTitle.setText(deviceId + " (Clone)"); // Ubah judul layar
+
+            Canvas targetCanvas = (Canvas) cell.getComponent(1); // <--- Canvas index 1
+
+// ===== TAMBAHKAN BARIS INI UNTUK MENGUNCI VARIABEL =====
+            final int finalTargetIndex = targetIndex;
 
             executor.submit(() -> {
                 try {
-                    // Gunakan judul jendela unik agar JNA tidak bingung
                     String windowTitle = "Scrcpy_Clone_" + System.currentTimeMillis();
 
-                    // Jalankan scrcpy untuk deviceId asli tapi ke windowTitle baru
+                    // Gunakan finalTargetIndex di sini, bukan targetIndex
+                    slotProcessMap.put(finalTargetIndex, windowTitle);
+
                     scrcpyService.start(deviceId, windowTitle);
-
-                    // Tanamkan ke canvas
                     scrcpyService.embed(windowTitle, targetCanvas, this, spinX, spinY);
-
                 } catch (Exception e) {
                     log("Gagal Duplikasi: " + e.getMessage());
                     deviceSlotMap.remove(finalCloneId);
@@ -256,6 +396,7 @@ public class MainDashboard extends JFrame {
             });
         });
     }
+
     public void refreshDeviceList() {
 // 🔥 FIX: Panggil melalui adbService
         List<String> devices = adbService.getConnectedDevices();
@@ -269,6 +410,7 @@ public class MainDashboard extends JFrame {
         panelLayar.repaint();
         log("Device ditemukan: " + devices.size());
     }
+
     // ================= UTIL =================
     public void log(String msg) {
         SwingUtilities.invokeLater(() -> {
@@ -276,12 +418,14 @@ public class MainDashboard extends JFrame {
             txtLog.setCaretPosition(txtLog.getDocument().getLength());
         });
     }
+
     private void setupLogStyle() {
         txtLog.setEditable(false);
         txtLog.setBackground(Color.BLACK);
         txtLog.setForeground(new Color(50, 255, 50));
         txtLog.setFont(new Font("Consolas", Font.PLAIN, 10));
     }
+
     private void startAutoDeviceWatcher() {
         executor.submit(() -> {
             while (true) {
@@ -306,31 +450,62 @@ public class MainDashboard extends JFrame {
         });
     }
 
+    // ================= CUSTOM COMPONENTS =================
+    class RoundedPanel extends JPanel {
+
+        private int cornerRadius = 20; // Atur tingkat kelengkungan di sini
+
+        public RoundedPanel(int radius) {
+            super();
+            this.cornerRadius = radius;
+            setOpaque(false); // Wajib false agar ujung kotak asli tidak ikut tergambar
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Dimension arcs = new Dimension(cornerRadius, cornerRadius);
+            int width = getWidth();
+            int height = getHeight();
+            Graphics2D graphics = (Graphics2D) g;
+
+            // Mengaktifkan antialiasing agar lengkungan halus (tidak bergerigi)
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            // Menggambar background dengan sudut melengkung
+            graphics.setColor(getBackground());
+            graphics.fillRoundRect(0, 0, width - 1, height - 1, arcs.width, arcs.height);
+        }
+    }
+
     // ================= [ ACTION LISTENERS ] =================
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
+        java.awt.GridBagConstraints gridBagConstraints;
 
-        panelDevices = new javax.swing.JPanel();
+        panelDevices = new RoundedPanel(25);
         panelDevicesList = new javax.swing.JPanel();
-        btnConnectWiFi = new javax.swing.JButton();
-        btnEnableTcp5555 = new javax.swing.JButton();
-        btnUSB = new javax.swing.JButton();
+        jPanel1 = new javax.swing.JPanel();
         btnConnect = new javax.swing.JButton();
-        spDevices = new javax.swing.JScrollPane();
-        jListDevices = new javax.swing.JList<>();
         btnRefresh = new javax.swing.JButton();
         btnDuplicate = new javax.swing.JButton();
+        btnUSB = new javax.swing.JButton();
+        btnConnectWiFi = new javax.swing.JButton();
+        btnEnableTcp5555 = new javax.swing.JButton();
+        spDevices = new javax.swing.JScrollPane();
+        jListDevices = new javax.swing.JList<>();
         panelControl = new javax.swing.JPanel();
         btnSendText = new javax.swing.JButton();
         chkSync = new javax.swing.JCheckBox();
         txtInputMasal = new javax.swing.JTextField();
         panelBulk = new javax.swing.JPanel();
-        btnInstallAPK = new javax.swing.JButton();
-        btnScreenshotAll = new javax.swing.JButton();
-        btnRebootAll = new javax.swing.JButton();
         spLog = new javax.swing.JScrollPane();
         txtLog = new javax.swing.JTextArea();
+        jPanel2 = new javax.swing.JPanel();
+        btnRebootAll = new javax.swing.JButton();
+        btnScreenshotAll = new javax.swing.JButton();
+        btnInstallAPK = new javax.swing.JButton();
         panelNav = new javax.swing.JPanel();
         btnRecentAll = new javax.swing.JButton();
         btnHomeAll = new javax.swing.JButton();
@@ -341,17 +516,40 @@ public class MainDashboard extends JFrame {
         spinY = new javax.swing.JSpinner();
         jLabel2 = new javax.swing.JLabel();
         jLabel3 = new javax.swing.JLabel();
-        panelLayar = new javax.swing.JPanel();
+        panelLayar = new RoundedPanel(25);
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setName("MainFrame"); // NOI18N
+        setPreferredSize(new java.awt.Dimension(1000, 600));
 
-        panelDevices.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 10, 1, 10));
+        panelDevices.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
         panelDevices.setPreferredSize(new java.awt.Dimension(345, 640));
         panelDevices.setLayout(new javax.swing.BoxLayout(panelDevices, javax.swing.BoxLayout.Y_AXIS));
 
         panelDevicesList.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1), "Devices"));
         panelDevicesList.setRequestFocusEnabled(false);
+
+        jPanel1.setLayout(new java.awt.GridLayout(4, 0, 0, 15));
+
+        btnConnect.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnConnect.setText("Connect");
+        btnConnect.addActionListener(this::btnConnectActionPerformed);
+        jPanel1.add(btnConnect);
+
+        btnRefresh.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnRefresh.setText("Refresh Devices");
+        btnRefresh.addActionListener(this::btnRefreshActionPerformed);
+        jPanel1.add(btnRefresh);
+
+        btnDuplicate.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnDuplicate.setText("Duplicate HP");
+        btnDuplicate.addActionListener(this::btnDuplicateActionPerformed);
+        jPanel1.add(btnDuplicate);
+
+        btnUSB.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnUSB.setText("USB Debug");
+        btnUSB.addActionListener(this::btnUSBActionPerformed);
+        jPanel1.add(btnUSB);
 
         btnConnectWiFi.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnConnectWiFi.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/wifi.png"))); // NOI18N
@@ -367,14 +565,6 @@ public class MainDashboard extends JFrame {
         btnEnableTcp5555.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
         btnEnableTcp5555.addActionListener(this::btnEnableTcp5555ActionPerformed);
 
-        btnUSB.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnUSB.setText("USB Debug");
-        btnUSB.addActionListener(this::btnUSBActionPerformed);
-
-        btnConnect.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnConnect.setText("Connect");
-        btnConnect.addActionListener(this::btnConnectActionPerformed);
-
         jListDevices.setModel(new javax.swing.AbstractListModel<String>() {
             String[] strings = { "Item 1", "Item 2", "Item 3", "Item 4", "Item 5" };
             public int getSize() { return strings.length; }
@@ -387,14 +577,6 @@ public class MainDashboard extends JFrame {
         });
         spDevices.setViewportView(jListDevices);
 
-        btnRefresh.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnRefresh.setText("Refresh Devices");
-        btnRefresh.addActionListener(this::btnRefreshActionPerformed);
-
-        btnDuplicate.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnDuplicate.setText("Duplicate HP");
-        btnDuplicate.addActionListener(this::btnDuplicateActionPerformed);
-
         javax.swing.GroupLayout panelDevicesListLayout = new javax.swing.GroupLayout(panelDevicesList);
         panelDevicesList.setLayout(panelDevicesListLayout);
         panelDevicesListLayout.setHorizontalGroup(
@@ -405,34 +587,28 @@ public class MainDashboard extends JFrame {
                         .addContainerGap()
                         .addComponent(btnConnectWiFi)
                         .addGap(32, 32, 32)
-                        .addComponent(btnEnableTcp5555, javax.swing.GroupLayout.PREFERRED_SIZE, 65, Short.MAX_VALUE))
+                        .addComponent(btnEnableTcp5555, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
                     .addComponent(spDevices))
-                .addGap(18, 18, 18)
-                .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(btnDuplicate, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                    .addComponent(btnRefresh, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                    .addComponent(btnConnect, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                    .addComponent(btnUSB, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                .addContainerGap())
+                .addGap(124, 124, 124))
+            .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelDevicesListLayout.createSequentialGroup()
+                    .addContainerGap(219, Short.MAX_VALUE)
+                    .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addContainerGap()))
         );
         panelDevicesListLayout.setVerticalGroup(
             panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelDevicesListLayout.createSequentialGroup()
-                .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(spDevices, javax.swing.GroupLayout.PREFERRED_SIZE, 66, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addGroup(panelDevicesListLayout.createSequentialGroup()
-                        .addComponent(btnConnect)
-                        .addGap(18, 18, 18)
-                        .addComponent(btnDuplicate)))
-                .addGap(18, 18, 18)
+                .addComponent(spDevices, javax.swing.GroupLayout.PREFERRED_SIZE, 66, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(29, 29, 29)
                 .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
                     .addComponent(btnEnableTcp5555)
-                    .addComponent(btnConnectWiFi)
-                    .addGroup(panelDevicesListLayout.createSequentialGroup()
-                        .addComponent(btnRefresh)
-                        .addGap(18, 18, 18)
-                        .addComponent(btnUSB)))
+                    .addComponent(btnConnectWiFi))
                 .addContainerGap())
+            .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                .addGroup(panelDevicesListLayout.createSequentialGroup()
+                    .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, 144, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGap(0, 6, Short.MAX_VALUE)))
         );
 
         panelDevices.add(panelDevicesList);
@@ -456,13 +632,13 @@ public class MainDashboard extends JFrame {
                 .addContainerGap()
                 .addGroup(panelControlLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(panelControlLayout.createSequentialGroup()
-                        .addComponent(txtInputMasal, javax.swing.GroupLayout.DEFAULT_SIZE, 189, Short.MAX_VALUE)
+                        .addComponent(txtInputMasal, javax.swing.GroupLayout.DEFAULT_SIZE, 199, Short.MAX_VALUE)
                         .addGap(12, 12, 12)
-                        .addComponent(btnSendText, javax.swing.GroupLayout.PREFERRED_SIZE, 110, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addComponent(btnSendText, javax.swing.GroupLayout.PREFERRED_SIZE, 101, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(15, 15, 15))
                     .addGroup(panelControlLayout.createSequentialGroup()
                         .addComponent(chkSync)
-                        .addGap(0, 0, Short.MAX_VALUE)))
-                .addContainerGap())
+                        .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))))
         );
         panelControlLayout.setVerticalGroup(
             panelControlLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -481,18 +657,6 @@ public class MainDashboard extends JFrame {
         panelBulk.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
         panelBulk.setPreferredSize(new java.awt.Dimension(325, 300));
 
-        btnInstallAPK.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnInstallAPK.setText("Install APK");
-        btnInstallAPK.addActionListener(this::btnInstallAPKActionPerformed);
-
-        btnScreenshotAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnScreenshotAll.setText("Screenshot All");
-        btnScreenshotAll.addActionListener(this::btnScreenshotAllActionPerformed);
-
-        btnRebootAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnRebootAll.setText("Reboot All");
-        btnRebootAll.addActionListener(this::btnRebootAllActionPerformed);
-
         spLog.setViewportBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
         spLog.setFont(new java.awt.Font("Segoe UI", 0, 8)); // NOI18N
         spLog.setRowHeaderView(null);
@@ -505,42 +669,55 @@ public class MainDashboard extends JFrame {
         txtLog.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
         spLog.setViewportView(txtLog);
 
+        jPanel2.setLayout(new java.awt.GridLayout(1, 0, 10, 0));
+
+        btnRebootAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnRebootAll.setText("Reboot All");
+        btnRebootAll.addActionListener(this::btnRebootAllActionPerformed);
+        jPanel2.add(btnRebootAll);
+
+        btnScreenshotAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnScreenshotAll.setText("Screenshot All");
+        btnScreenshotAll.addActionListener(this::btnScreenshotAllActionPerformed);
+        jPanel2.add(btnScreenshotAll);
+
+        btnInstallAPK.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnInstallAPK.setText("Install APK");
+        btnInstallAPK.addActionListener(this::btnInstallAPKActionPerformed);
+        jPanel2.add(btnInstallAPK);
+
         javax.swing.GroupLayout panelBulkLayout = new javax.swing.GroupLayout(panelBulk);
         panelBulk.setLayout(panelBulkLayout);
         panelBulkLayout.setHorizontalGroup(
             panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(panelBulkLayout.createSequentialGroup()
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelBulkLayout.createSequentialGroup()
                 .addContainerGap()
-                .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(spLog)
+                .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                    .addComponent(spLog, javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(panelBulkLayout.createSequentialGroup()
-                        .addComponent(btnInstallAPK)
-                        .addGap(28, 28, 28)
-                        .addComponent(btnScreenshotAll)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 28, Short.MAX_VALUE)
-                        .addComponent(btnRebootAll)))
-                .addContainerGap())
+                        .addGap(0, 0, Short.MAX_VALUE)
+                        .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addGap(44, 44, 44))
         );
         panelBulkLayout.setVerticalGroup(
             panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelBulkLayout.createSequentialGroup()
                 .addContainerGap()
                 .addComponent(spLog, javax.swing.GroupLayout.PREFERRED_SIZE, 152, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 127, Short.MAX_VALUE)
-                .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(btnInstallAPK)
-                    .addComponent(btnScreenshotAll)
-                    .addComponent(btnRebootAll))
-                .addContainerGap())
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(56, Short.MAX_VALUE))
         );
 
         panelDevices.add(panelBulk);
 
-        panelNav.setBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(51, 51, 51)));
+        panelNav.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
+        panelNav.setPreferredSize(new java.awt.Dimension(325, 70));
 
         btnRecentAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnRecentAll.setIcon(new javax.swing.ImageIcon(getClass().getResource("/menu.png"))); // NOI18N
         btnRecentAll.setText("Recent");
+        btnRecentAll.setDisabledIcon(null);
         btnRecentAll.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
         btnRecentAll.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
         btnRecentAll.addActionListener(this::btnRecentAllActionPerformed);
@@ -548,6 +725,7 @@ public class MainDashboard extends JFrame {
         btnHomeAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnHomeAll.setIcon(new javax.swing.ImageIcon(getClass().getResource("/home.png"))); // NOI18N
         btnHomeAll.setText("Home");
+        btnHomeAll.setDisabledIcon(null);
         btnHomeAll.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
         btnHomeAll.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
         btnHomeAll.addActionListener(this::btnHomeAllActionPerformed);
@@ -555,6 +733,7 @@ public class MainDashboard extends JFrame {
         btnBackAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnBackAll.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/undo.png"))); // NOI18N
         btnBackAll.setText("Back");
+        btnBackAll.setDisabledIcon(null);
         btnBackAll.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
         btnBackAll.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
         btnBackAll.addActionListener(this::btnBackAllActionPerformed);
@@ -563,24 +742,23 @@ public class MainDashboard extends JFrame {
         panelNav.setLayout(panelNavLayout);
         panelNavLayout.setHorizontalGroup(
             panelNavLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelNavLayout.createSequentialGroup()
-                .addContainerGap()
+            .addGroup(panelNavLayout.createSequentialGroup()
+                .addGap(14, 14, 14)
                 .addComponent(btnRecentAll)
-                .addGap(44, 44, 44)
+                .addGap(39, 39, 39)
                 .addComponent(btnHomeAll)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 51, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 50, Short.MAX_VALUE)
                 .addComponent(btnBackAll)
-                .addContainerGap())
+                .addGap(14, 14, 14))
         );
         panelNavLayout.setVerticalGroup(
             panelNavLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelNavLayout.createSequentialGroup()
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addGap(9, 9, 9)
                 .addGroup(panelNavLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(btnBackAll)
+                    .addComponent(btnRecentAll)
                     .addComponent(btnHomeAll)
-                    .addComponent(btnRecentAll, javax.swing.GroupLayout.Alignment.TRAILING))
-                .addContainerGap())
+                    .addComponent(btnBackAll)))
         );
 
         panelDevices.add(panelNav);
@@ -643,7 +821,7 @@ public class MainDashboard extends JFrame {
         );
         panelLayarLayout.setVerticalGroup(
             panelLayarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGap(0, 638, Short.MAX_VALUE)
+            .addGap(0, 568, Short.MAX_VALUE)
         );
 
         getContentPane().add(panelLayar, java.awt.BorderLayout.CENTER);
@@ -803,6 +981,8 @@ public class MainDashboard extends JFrame {
     private javax.swing.JLabel jLabel2;
     private javax.swing.JLabel jLabel3;
     private javax.swing.JList<String> jListDevices;
+    private javax.swing.JPanel jPanel1;
+    private javax.swing.JPanel jPanel2;
     private javax.swing.JPanel panelBulk;
     private javax.swing.JPanel panelControl;
     private javax.swing.JPanel panelDevices;
