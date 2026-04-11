@@ -14,11 +14,37 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 
 public class MainDashboard extends JFrame {
 
+    // ================= CUSTOM COMPONENTS =================
+    // Class untuk membuat panel dengan sudut melengkung
+    class RoundedPanel extends JPanel {
+        private int cornerRadius = 15;
+
+        public RoundedPanel(int radius) {
+            super();
+            this.cornerRadius = radius;
+            setOpaque(false);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Dimension arcs = new Dimension(cornerRadius, cornerRadius);
+            int width = getWidth();
+            int height = getHeight();
+            Graphics2D graphics = (Graphics2D) g;
+            
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            graphics.setColor(getBackground());
+            graphics.fillRoundRect(0, 0, width - 1, height - 1, arcs.width, arcs.height);
+        }
+    }
+
     //private int nextSlotIndex = 0;
     // ================= CONFIG =================
+    
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
     private final String scrcpyExecutable = basePath + "scrcpy.exe";
-    public final String adbExecutable = basePath + "adb.exe";
+    public final String adbExecutable = basePath + "adb.exe";     
     //==================================================
     private ScrcpyService scrcpyService;
     private SyncService syncService;
@@ -29,8 +55,6 @@ public class MainDashboard extends JFrame {
     private final Set<String> lastDevices = new HashSet<>();
     // Tambahkan ini untuk mengunci HP ke slot spesifik
     private final Map<String, Integer> deviceSlotMap = new HashMap<>();
-    // Tambahkan ini di bawah deviceSlotMap
-    private final Map<Integer, String> slotProcessMap = new HashMap<>();
     public final ExecutorService executor = Executors.newFixedThreadPool(10);
 
     // ================= CONSTRUCTOR =================
@@ -40,19 +64,19 @@ public class MainDashboard extends JFrame {
         initUI();
         startAutoDeviceWatcher();
     }
-
+    
     private void initServices() {
-
         scrcpyService = new ScrcpyService(scrcpyExecutable, executor, this);
         adbService = new AdbService(this, adbExecutable, executor); // 🔥 INISIALISASI ADB
         syncService = new SyncService(this, panelLayar, chkSync); // INISIALISASI SYNC
     }
-
+    
     private void initUI() {
         // Bersihkan layout bawaan NetBeans
         getContentPane().removeAll();
         getContentPane().setLayout(new BorderLayout());
         setExtendedState(JFrame.MAXIMIZED_BOTH);
+        
         // 🔥 BUNGKUS PANEL LAYAR DENGAN SCROLLPANE
         JScrollPane scrollLayar = new JScrollPane(panelLayar);
         scrollLayar.setBorder(BorderFactory.createEmptyBorder()); // Hilangkan garis tepi agar bersih
@@ -65,10 +89,10 @@ public class MainDashboard extends JFrame {
         getContentPane().add(scrollLayar, BorderLayout.CENTER);  // Masukkan ScrollPane ke tengah, bukan panelLayar langsung
 
         // Styling sisa panel
-        panelDevices.setBackground(Color.DARK_GRAY);
-        //panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 1));
+        panelDevices.setBackground(Color.LIGHT_GRAY);
+        panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 1, 10, 1));
 
-        //panelLayar.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        panelLayar.setBorder(BorderFactory.createEmptyBorder(10, 1, 10, 1));
         panelLayar.setBackground(Color.LIGHT_GRAY);
 
         setupLogStyle();
@@ -76,8 +100,9 @@ public class MainDashboard extends JFrame {
 
         getContentPane().revalidate();
         getContentPane().repaint();
+        
         // ======== INIT FITUR CLONE/SYNC ========
-// Pantau pergerakan jendela aplikasi agar kaca overlay tidak tertinggal
+        // Pantau pergerakan jendela aplikasi agar kaca overlay tidak tertinggal
         this.addComponentListener(new ComponentAdapter() {
             @Override
             public void componentMoved(ComponentEvent e) {
@@ -103,165 +128,40 @@ public class MainDashboard extends JFrame {
             }
         });
     }
-
-    //===================================
+    
     private void shutdown() {
         scrcpyService.stopAll();
         executor.shutdownNow();
     }
-// ==========================================================
-    // METHOD UNTUK MENUTUP SLOT TERTENTU (FIXED)
+    
     // ==========================================================
-    private void closeSlot(int targetIndex) {
-        String windowTitle = slotProcessMap.get(targetIndex);
-        
-        // 1. Matikan proses spesifik lewat Taskkill menggunakan ProcessBuilder
-        if (windowTitle != null) {
-            try {
-                // 🔥 FIX 1: Gunakan ProcessBuilder agar string CMD tidak berantakan
-                ProcessBuilder pb = new ProcessBuilder("taskkill", "/F", "/T", "/FI", "WINDOWTITLE eq " + windowTitle);
-                pb.start();
-                log("Slot " + targetIndex + " ditutup (" + windowTitle + ")");
-            } catch (Exception e) {
-                log("Gagal mematikan proses: " + e.getMessage());
-            }
-        }
-
-        // 2. Bersihkan dari Map memori
-        slotProcessMap.remove(targetIndex);
-        String keyToRemove = null;
-        for (Map.Entry<String, Integer> entry : deviceSlotMap.entrySet()) {
-            if (entry.getValue() == targetIndex) {
-                keyToRemove = entry.getKey();
-                break;
-            }
-        }
-        if (keyToRemove != null) {
-            deviceSlotMap.remove(keyToRemove);
-        }
-
-        // 3. Reset UI secara menyeluruh
-        if (targetIndex < panelLayar.getComponentCount()) {
-            JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            Component canvasToRemove = null;
-
-            for (Component c : cell.getComponents()) {
-                if (c instanceof JPanel) { 
-                    // Reset Label di Header Panel
-                    for (Component hc : ((JPanel) c).getComponents()) {
-                        if (hc instanceof JLabel) {
-                            ((JLabel) hc).setText("Slot Kosong");
-                        }
-                    }
-                } else if (c instanceof Canvas) {
-                    canvasToRemove = c; // Tandai canvas yang lama
-                }
-            }
-
-// 🔥 FIX: Cabut Canvas lama dan pasang yang baru dengan ukuran yang sama
-            if (canvasToRemove != null) {
-                // Simpan ukuran layar lama sebelum dihancurkan
-                java.awt.Dimension oldSize = canvasToRemove.getSize(); 
-                
-                cell.remove(canvasToRemove);
-                
-                Canvas freshCanvas = new Canvas();
-                freshCanvas.setBackground(java.awt.Color.BLACK);
-                
-                // Gunakan ukuran lama agar kotak tidak menciut
-                if (oldSize.width > 0 && oldSize.height > 0) {
-                    freshCanvas.setPreferredSize(oldSize);
-                } else {
-                    freshCanvas.setPreferredSize(new java.awt.Dimension(320, 584));
-                }
-                
-                cell.add(freshCanvas, java.awt.BorderLayout.CENTER);
-            }
-            
-            // Refresh layout utama
-            panelLayar.revalidate();
-            panelLayar.repaint();
-            
-        }
-    }
-
-// ==========================================================
-    // DYNAMIC GRID MAKER (FIXED SCROLLBAR & ANTI MENGKERUT)
+    // DYNAMIC GRID MAKER
     // ==========================================================
     private void syncGridPanels(int requiredCount) {
         int currentCount = panelLayar.getComponentCount();
-        panelLayar.setLayout(new java.awt.GridLayout(0, 4, 10, 10)); // Tetap 3 kolom
 
-        // Patokan ukuran tinggi HP (Header + Layar)
-        int tinggiHP = 560; 
+        // 🔥 Kunci permanen di 3 kolom
+        panelLayar.setLayout(new java.awt.GridLayout(0, 3, 10, 10));
 
         if (currentCount < requiredCount) {
             for (int i = currentCount; i < requiredCount; i++) {
-                final int slotIndex = i; 
-                
                 JPanel cell = new JPanel(new java.awt.BorderLayout());
                 cell.setBackground(java.awt.Color.BLACK);
                 cell.setBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(50, 50, 50)));
 
-                // --- HEADER PANEL DENGAN TOMBOL CLOSE ---
-                JPanel headerPanel = new JPanel(new java.awt.BorderLayout());
-                headerPanel.setBackground(new java.awt.Color(30, 30, 30));
-                
-                JLabel lblTitle = new JLabel("Slot Kosong");
-                lblTitle.setForeground(java.awt.Color.WHITE);
-                lblTitle.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 5, 2, 0));
-                lblTitle.setFont(new java.awt.Font("Segoe UI", java.awt.Font.BOLD, 11));
-                
-                JButton btnClose = new JButton("X");
-                btnClose.setBackground(new java.awt.Color(200, 50, 50));
-                btnClose.setForeground(java.awt.Color.WHITE);
-                btnClose.setFocusPainted(false);
-                btnClose.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 10, 2, 10));
-                btnClose.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
-                btnClose.addActionListener(e -> closeSlot(slotIndex));
-
-                headerPanel.add(lblTitle, java.awt.BorderLayout.CENTER);
-                headerPanel.add(btnClose, java.awt.BorderLayout.EAST);
-
                 java.awt.Canvas c = new java.awt.Canvas();
                 c.setBackground(java.awt.Color.BLACK);
-                
-                cell.add(headerPanel, java.awt.BorderLayout.NORTH);
                 cell.add(c, java.awt.BorderLayout.CENTER);
 
                 panelLayar.add(cell);
             }
         }
 
-        // 🔥 FIX PAMUNGKAS: Paksa JScrollPane membaca tinggi baru!
-        int totalKotak = panelLayar.getComponentCount();
-        
-        // Rumus matematika: jika kotak 1-3 = 1 baris, 4-6 = 2 baris, dst.
-        int jumlahBaris = (totalKotak + 2) / 4; 
-        
-        // Hitung total tinggi pixel yang dibutuhkan agar layar tidak tergencet
-        int totalTinggiDibutuhkan = (jumlahBaris * tinggiHP) + ((jumlahBaris + 1) * 10);
-        
-        // Ambil lebar saat ini agar lebarnya tidak rusak
-        int lebarSaatIni = panelLayar.getParent() != null ? panelLayar.getParent().getWidth() : 800;
-        if (lebarSaatIni == 0) lebarSaatIni = 800; // Pencegahan jika UI belum selesai render
-
-        // Kunci secara paksa ukuran panelLayar
-        panelLayar.setPreferredSize(new java.awt.Dimension(lebarSaatIni, totalTinggiDibutuhkan));
-        
-        // Wajib revalidate 3 lapis agar Scrollbar-nya "bangun"
         panelLayar.revalidate();
         panelLayar.repaint();
-        
-        if (panelLayar.getParent() instanceof javax.swing.JViewport) {
-            javax.swing.JViewport vp = (javax.swing.JViewport) panelLayar.getParent();
-            vp.revalidate(); 
-            if (vp.getParent() != null) {
-                vp.getParent().revalidate(); // Ini adalah JScrollPane-nya!
-            }
-        }
     }
     
+    // ==========================================================
     // CORE MIRROR: Sekarang mendukung Duplikasi (Multi-Instance)
     // ==========================================================
     private void startScrcpyMirror(String deviceId, boolean isClone) {
@@ -298,18 +198,14 @@ public class MainDashboard extends JFrame {
 
             // Ambil Canvas dari kotak target
             JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            JPanel header = (JPanel) cell.getComponent(0);
-            JLabel lblTitle = (JLabel) header.getComponent(0);
-            lblTitle.setText(deviceId + (isClone ? " (Clone)" : "")); // Ubah judul layar
-
-            Canvas targetCanvas = (Canvas) cell.getComponent(1); // <--- Sekarang Canvas ada di index 1
+            Canvas targetCanvas = (Canvas) cell.getComponent(0);
 
             // 4. Jalankan Scrcpy di background thread
             executor.submit(() -> {
                 try {
                     // Berikan judul jendela yang unik dan mudah dicari
                     String windowTitle = "Mirror_" + targetIndex + "_" + (isClone ? "CLONE" : "ORIG");
-                    slotProcessMap.put(targetIndex, windowTitle);
+
                     // Start Scrcpy (dengan port unik)
                     scrcpyService.start(deviceId, windowTitle);
 
@@ -326,7 +222,7 @@ public class MainDashboard extends JFrame {
             });
         });
     }
-
+    
     // ==========================================================
     // FITUR DUPLIKAT: Membuka HP yang sama di slot baru
     // ==========================================================
@@ -371,24 +267,19 @@ public class MainDashboard extends JFrame {
             syncGridPanels(targetIndex + 1);
 
             JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            JPanel header = (JPanel) cell.getComponent(0);
-            JLabel lblTitle = (JLabel) header.getComponent(0);
-            lblTitle.setText(deviceId + " (Clone)"); // Ubah judul layar
-
-            Canvas targetCanvas = (Canvas) cell.getComponent(1); // <--- Canvas index 1
-
-// ===== TAMBAHKAN BARIS INI UNTUK MENGUNCI VARIABEL =====
-            final int finalTargetIndex = targetIndex;
+            Canvas targetCanvas = (Canvas) cell.getComponent(0);
 
             executor.submit(() -> {
                 try {
+                    // Gunakan judul jendela unik agar JNA tidak bingung
                     String windowTitle = "Scrcpy_Clone_" + System.currentTimeMillis();
 
-                    // Gunakan finalTargetIndex di sini, bukan targetIndex
-                    slotProcessMap.put(finalTargetIndex, windowTitle);
-
+                    // Jalankan scrcpy untuk deviceId asli tapi ke windowTitle baru
                     scrcpyService.start(deviceId, windowTitle);
+
+                    // Tanamkan ke canvas
                     scrcpyService.embed(windowTitle, targetCanvas, this, spinX, spinY);
+
                 } catch (Exception e) {
                     log("Gagal Duplikasi: " + e.getMessage());
                     deviceSlotMap.remove(finalCloneId);
@@ -396,9 +287,9 @@ public class MainDashboard extends JFrame {
             });
         });
     }
-
+    
     public void refreshDeviceList() {
-// 🔥 FIX: Panggil melalui adbService
+        // 🔥 FIX: Panggil melalui adbService
         List<String> devices = adbService.getConnectedDevices();
 
         DefaultListModel<String> model = new DefaultListModel<>();
@@ -410,7 +301,7 @@ public class MainDashboard extends JFrame {
         panelLayar.repaint();
         log("Device ditemukan: " + devices.size());
     }
-
+    
     // ================= UTIL =================
     public void log(String msg) {
         SwingUtilities.invokeLater(() -> {
@@ -418,14 +309,14 @@ public class MainDashboard extends JFrame {
             txtLog.setCaretPosition(txtLog.getDocument().getLength());
         });
     }
-
+    
     private void setupLogStyle() {
         txtLog.setEditable(false);
         txtLog.setBackground(Color.BLACK);
         txtLog.setForeground(new Color(50, 255, 50));
         txtLog.setFont(new Font("Consolas", Font.PLAIN, 10));
     }
-
+    
     private void startAutoDeviceWatcher() {
         executor.submit(() -> {
             while (true) {
@@ -450,39 +341,10 @@ public class MainDashboard extends JFrame {
         });
     }
 
-    // ================= CUSTOM COMPONENTS =================
-    class RoundedPanel extends JPanel {
-
-        private int cornerRadius = 20; // Atur tingkat kelengkungan di sini
-
-        public RoundedPanel(int radius) {
-            super();
-            this.cornerRadius = radius;
-            setOpaque(false); // Wajib false agar ujung kotak asli tidak ikut tergambar
-        }
-
-        @Override
-        protected void paintComponent(Graphics g) {
-            super.paintComponent(g);
-            Dimension arcs = new Dimension(cornerRadius, cornerRadius);
-            int width = getWidth();
-            int height = getHeight();
-            Graphics2D graphics = (Graphics2D) g;
-
-            // Mengaktifkan antialiasing agar lengkungan halus (tidak bergerigi)
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-            // Menggambar background dengan sudut melengkung
-            graphics.setColor(getBackground());
-            graphics.fillRoundRect(0, 0, width - 1, height - 1, arcs.width, arcs.height);
-        }
-    }
-
     // ================= [ ACTION LISTENERS ] =================
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
-        java.awt.GridBagConstraints gridBagConstraints;
 
         panelDevices = new RoundedPanel(25);
         panelDevicesList = new javax.swing.JPanel();
@@ -522,7 +384,6 @@ public class MainDashboard extends JFrame {
         setName("MainFrame"); // NOI18N
         setPreferredSize(new java.awt.Dimension(1000, 600));
 
-        panelDevices.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
         panelDevices.setPreferredSize(new java.awt.Dimension(345, 640));
         panelDevices.setLayout(new javax.swing.BoxLayout(panelDevices, javax.swing.BoxLayout.Y_AXIS));
 
@@ -592,7 +453,7 @@ public class MainDashboard extends JFrame {
                 .addGap(124, 124, 124))
             .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                 .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelDevicesListLayout.createSequentialGroup()
-                    .addContainerGap(219, Short.MAX_VALUE)
+                    .addContainerGap(229, Short.MAX_VALUE)
                     .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addContainerGap()))
         );
@@ -632,7 +493,7 @@ public class MainDashboard extends JFrame {
                 .addContainerGap()
                 .addGroup(panelControlLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(panelControlLayout.createSequentialGroup()
-                        .addComponent(txtInputMasal, javax.swing.GroupLayout.DEFAULT_SIZE, 199, Short.MAX_VALUE)
+                        .addComponent(txtInputMasal, javax.swing.GroupLayout.DEFAULT_SIZE, 209, Short.MAX_VALUE)
                         .addGap(12, 12, 12)
                         .addComponent(btnSendText, javax.swing.GroupLayout.PREFERRED_SIZE, 101, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addGap(15, 15, 15))
@@ -706,7 +567,7 @@ public class MainDashboard extends JFrame {
                 .addComponent(spLog, javax.swing.GroupLayout.PREFERRED_SIZE, 152, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(56, Short.MAX_VALUE))
+                .addContainerGap(65, Short.MAX_VALUE))
         );
 
         panelDevices.add(panelBulk);
@@ -747,7 +608,7 @@ public class MainDashboard extends JFrame {
                 .addComponent(btnRecentAll)
                 .addGap(39, 39, 39)
                 .addComponent(btnHomeAll)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 50, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 60, Short.MAX_VALUE)
                 .addComponent(btnBackAll)
                 .addGap(14, 14, 14))
         );
