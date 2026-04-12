@@ -56,7 +56,9 @@ public class AdbService {
             String output = CommandExecutor.executeWithTimeout(5000, adb, "connect", ipAddress);
             if (output.contains("connected")) {
                 dashboard.log("Berhasil connect: " + ipAddress);
-                SwingUtilities.invokeLater(dashboard::refreshDeviceList);
+                // Ambil list terbaru, lalu kirim ke dashboard
+                List<String> updatedDevices = getConnectedDevices();
+                SwingUtilities.invokeLater(() -> dashboard.refreshDeviceList(updatedDevices));
             } else {
                 dashboard.log("Gagal connect: " + output.trim());
             }
@@ -91,7 +93,9 @@ public class AdbService {
                                 String res = CommandExecutor.executeWithTimeout(2000, adb, "connect", testIp + ":5555");
                                 if (res != null && (res.contains("connected") || res.contains("already connected"))) {
                                     dashboard.log("DITEMUKAN: " + testIp);
-                                    SwingUtilities.invokeLater(dashboard::refreshDeviceList);
+                                    // Ambil list terbaru, lalu kirim ke dashboard
+                                    List<String> updatedDevices = getConnectedDevices();
+                                    SwingUtilities.invokeLater(() -> dashboard.refreshDeviceList(updatedDevices));
                                 }
                             }
                         } catch (Exception ignored) {

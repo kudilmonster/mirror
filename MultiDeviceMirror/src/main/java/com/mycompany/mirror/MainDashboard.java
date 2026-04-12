@@ -96,7 +96,11 @@ public class MainDashboard extends JFrame {
         panelLayar.setBackground(Color.LIGHT_GRAY);
 
         setupLogStyle();
-        refreshDeviceList();
+        // Jalankan di background agar UI tidak freeze saat aplikasi baru dibuka
+        executor.submit(() -> {
+            List<String> initialDevices = adbService.getConnectedDevices();
+            refreshDeviceList(initialDevices);
+        });
 
         getContentPane().revalidate();
         getContentPane().repaint();
@@ -134,100 +138,53 @@ public class MainDashboard extends JFrame {
         executor.shutdownNow();
     }
 
-private void closeSlot(int index) {
-    log("Menutup slot: " + index);
+    // ==========================================================
+    // DYNAMIC GRID MAKER (Dengan Tombol Close)
+    // ==========================================================
+    private void syncGridPanels(int requiredCount) {
+        int currentCount = panelLayar.getComponentCount();
+        panelLayar.setLayout(new java.awt.GridLayout(0, 3, 10, 10));
 
-    // Cari device di slot ini
-    String keyToRemove = null;
+        if (currentCount < requiredCount) {
+            for (int i = currentCount; i < requiredCount; i++) {
+                JPanel cell = new JPanel(new java.awt.BorderLayout());
+                cell.setBackground(java.awt.Color.BLACK);
+                cell.setBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(50, 50, 50)));
 
-    for (Map.Entry<String, Integer> entry : deviceSlotMap.entrySet()) {
-        if (entry.getValue() == index) {
-            keyToRemove = entry.getKey();
-            break;
+                // 🔥 BIKIN HEADER (Judul & Tombol Close)
+                JPanel header = new JPanel(new java.awt.BorderLayout());
+                header.setBackground(new java.awt.Color(30, 30, 30));
+                header.setPreferredSize(new java.awt.Dimension(0, 25));
+
+                JLabel lblTitle = new JLabel(" Slot Kosong " + (i + 1));
+                lblTitle.setForeground(java.awt.Color.LIGHT_GRAY);
+                lblTitle.setFont(new java.awt.Font("Segoe UI", java.awt.Font.BOLD, 11));
+
+                JButton btnClose = new JButton("X");
+                btnClose.setMargin(new java.awt.Insets(0, 5, 0, 5));
+                btnClose.setBackground(new java.awt.Color(200, 50, 50)); // Merah elegan
+                btnClose.setForeground(java.awt.Color.WHITE);
+                btnClose.setFocusPainted(false);
+                btnClose.setVisible(false); // 💡 Sembunyikan kalau slot belum dipakai
+
+                header.add(lblTitle, java.awt.BorderLayout.CENTER);
+                header.add(btnClose, java.awt.BorderLayout.EAST);
+
+                // KANVAS LAYAR
+                java.awt.Canvas c = new java.awt.Canvas();
+                c.setBackground(java.awt.Color.BLACK);
+
+                // Masukkan Header & Canvas ke dalam Cell
+                cell.add(header, java.awt.BorderLayout.NORTH);
+                cell.add(c, java.awt.BorderLayout.CENTER);
+
+                panelLayar.add(cell);
+            }
         }
+
+        panelLayar.revalidate();
+        panelLayar.repaint();
     }
-
-    // Stop scrcpy
-    if (keyToRemove != null) {
-        scrcpyService.stopBySlot(index);
-        deviceSlotMap.remove(keyToRemove);
-    }
-
-    // Reset UI
-    JPanel cell = (JPanel) panelLayar.getComponent(index);
-    cell.removeAll();
-
-    JPanel header = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 2));
-    header.setOpaque(false);
-
-    JButton btnClose = new JButton("✕");
-    btnClose.setForeground(Color.WHITE);
-    btnClose.setBackground(new Color(200, 50, 50));
-    btnClose.setFocusPainted(false);
-
-    btnClose.addActionListener(e -> closeSlot(index));
-
-    Canvas canvas = new Canvas();
-    canvas.setBackground(Color.BLACK);
-
-    header.add(btnClose);
-
-    cell.add(header, BorderLayout.NORTH);
-    cell.add(canvas, BorderLayout.CENTER);
-
-    cell.revalidate();
-    cell.repaint();
-}
-
-private void syncGridPanels(int requiredCount) {
-    int currentCount = panelLayar.getComponentCount();
-
-    panelLayar.setLayout(new GridLayout(0, 3, 10, 10));
-
-    if (currentCount < requiredCount) {
-        for (int i = currentCount; i < requiredCount; i++) {
-
-            JPanel cell = new JPanel(new BorderLayout());
-            cell.setBackground(Color.BLACK);
-            cell.setBorder(BorderFactory.createLineBorder(new Color(50, 50, 50)));
-
-            // ===== HEADER (CLOSE BUTTON) =====
-            JPanel header = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 2));
-            header.setOpaque(false);
-
-            JButton btnClose = new JButton("✕");
-            btnClose.setForeground(Color.WHITE);
-            btnClose.setBackground(new Color(200, 50, 50));
-            btnClose.setFocusPainted(false);
-
-            int index = i;
-            btnClose.addActionListener(e -> closeSlot(index));
-
-            header.add(btnClose);
-
-            // ===== CANVAS =====
-            Canvas canvas = new Canvas();
-            canvas.setBackground(Color.BLACK);
-
-            cell.add(header, BorderLayout.NORTH);
-            cell.add(canvas, BorderLayout.CENTER);
-
-            panelLayar.add(cell);
-        }
-    }
-
-    panelLayar.revalidate();
-    panelLayar.repaint();
-}
-
-private Canvas getCanvasFromCell(JPanel cell) {
-    for (Component comp : cell.getComponents()) {
-        if (comp instanceof Canvas) {
-            return (Canvas) comp;
-        }
-    }
-    return null;
-}
 
     // ==========================================================
     // CORE MIRROR: Sekarang mendukung Duplikasi (Multi-Instance)
@@ -261,24 +218,46 @@ private Canvas getCanvasFromCell(JPanel cell) {
             log("Membuka Slot " + targetIndex + " untuk: " + deviceId);
             deviceSlotMap.put(slotKey, targetIndex);
 
-            // 3. Pastikan Grid siap
+// 3. Pastikan Grid siap
             syncGridPanels(targetIndex + 1);
 
-            // Ambil Canvas dari kotak target
-JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-Canvas targetCanvas = getCanvasFromCell(cell);
+            // 🔥 BACA STRUKTUR BARU CELL (Header & Canvas)
+            JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
+            java.awt.BorderLayout layout = (java.awt.BorderLayout) cell.getLayout();
 
-if (targetCanvas == null) {
-    log("Canvas tidak ditemukan!");
-    return;
-}
+            JPanel header = (JPanel) layout.getLayoutComponent(java.awt.BorderLayout.NORTH);
+            java.awt.Canvas targetCanvas = (java.awt.Canvas) layout.getLayoutComponent(java.awt.BorderLayout.CENTER);
+
+            java.awt.BorderLayout headerLayout = (java.awt.BorderLayout) header.getLayout();
+            JLabel lblTitle = (JLabel) headerLayout.getLayoutComponent(java.awt.BorderLayout.CENTER);
+            JButton btnClose = (JButton) headerLayout.getLayoutComponent(java.awt.BorderLayout.EAST);
+
+            String windowTitle = "Mirror_" + targetIndex + "_" + (isClone ? "CLONE" : "ORIG");
+
+            // 🔥 TAMPILKAN UI & TOMBOL CLOSE
+            lblTitle.setText(" " + deviceId + (isClone ? " (Clone)" : ""));
+            btnClose.setVisible(true);
+
+            // Bersihkan event listener lama (penting jika slot ini bekas pakai)
+            for (java.awt.event.ActionListener al : btnClose.getActionListeners()) {
+                btnClose.removeActionListener(al);
+            }
+
+            // 🔥 PASANG FUNGSI KLIK TOMBOL CLOSE
+            btnClose.addActionListener(e -> {
+                log("User menekan tutup pada: " + deviceId);
+                scrcpyService.stopInstance(windowTitle); // 1. Matikan .exe scrcpy
+                deviceSlotMap.remove(slotKey);           // 2. Kosongkan jatah slot
+
+                // 3. Reset tampilan kotak kembali ke awal (kosong)
+                lblTitle.setText(" Slot Kosong " + (targetIndex + 1));
+                btnClose.setVisible(false);
+                targetCanvas.repaint();
+            });
 
             // 4. Jalankan Scrcpy di background thread
             executor.submit(() -> {
                 try {
-                    // Berikan judul jendela yang unik dan mudah dicari
-                    String windowTitle = "Mirror_" + targetIndex + "_" + (isClone ? "CLONE" : "ORIG");
-
                     // Start Scrcpy (dengan port unik)
                     scrcpyService.start(deviceId, windowTitle);
 
@@ -339,13 +318,9 @@ if (targetCanvas == null) {
             deviceSlotMap.put(finalCloneId, targetIndex);
             syncGridPanels(targetIndex + 1);
 
-JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-Canvas targetCanvas = getCanvasFromCell(cell);
+            JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
+            Canvas targetCanvas = (Canvas) cell.getComponent(0);
 
-if (targetCanvas == null) {
-    log("Canvas tidak ditemukan!");
-    return;
-}
             executor.submit(() -> {
                 try {
                     // Gunakan judul jendela unik agar JNA tidak bingung
@@ -365,18 +340,19 @@ if (targetCanvas == null) {
         });
     }
 
-    public void refreshDeviceList() {
-        // 🔥 FIX: Panggil melalui adbService
-        List<String> devices = adbService.getConnectedDevices();
+// Menerima data List, tidak lagi memanggil adbService di dalam sini
+    public void refreshDeviceList(List<String> devices) {
+        SwingUtilities.invokeLater(() -> {
+            DefaultListModel<String> model = new DefaultListModel<>();
+            devices.forEach(model::addElement);
 
-        DefaultListModel<String> model = new DefaultListModel<>();
-        devices.forEach(model::addElement);
+            jListDevices.setModel(model);
+            // activeDevices.clear(); // (Hapus baris ini seperti koreksi saya sebelumnya)
 
-        jListDevices.setModel(model);
-        activeDevices.clear();
-        panelLayar.revalidate();
-        panelLayar.repaint();
-        log("Device ditemukan: " + devices.size());
+            panelLayar.revalidate();
+            panelLayar.repaint();
+            log("Device ditemukan: " + devices.size());
+        });
     }
 
     // ================= UTIL =================
@@ -398,7 +374,7 @@ if (targetCanvas == null) {
         executor.submit(() -> {
             while (true) {
                 try {
-                    // 🔥 FIX: Panggil melalui adbService
+// Di dalam startAutoDeviceWatcher
                     Set<String> current = new HashSet<>(adbService.getConnectedDevices());
 
                     if (!current.equals(lastDevices)) {
@@ -406,7 +382,8 @@ if (targetCanvas == null) {
                         lastDevices.addAll(current);
 
                         log("Perubahan device terdeteksi...");
-                        SwingUtilities.invokeLater(this::refreshDeviceList);
+                        // 🔥 Lempar datanya ke UI, UI jangan disuruh cari data lagi
+                        refreshDeviceList(new ArrayList<>(current));
                     }
 
                     Thread.sleep(2000);
@@ -418,6 +395,17 @@ if (targetCanvas == null) {
         });
     }
 
+    // ==========================================================
+    // MEMORY CLEANSING: Membersihkan komponen Grid (Mencegah Leak)
+    // ==========================================================
+    public void clearGrid() {
+        SwingUtilities.invokeLater(() -> {
+            panelLayar.removeAll(); // Hapus semua kotak Canvas dan JPanel dari memori
+            panelLayar.revalidate(); // Beritahu Java bahwa struktur UI berubah
+            panelLayar.repaint();    // Gambar ulang layar agar bersih secara visual
+        });
+    }
+
     // ================= [ ACTION LISTENERS ] =================
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
@@ -425,15 +413,16 @@ if (targetCanvas == null) {
 
         panelDevices = new RoundedPanel(25);
         panelDevicesList = new javax.swing.JPanel();
-        jPanel1 = new javax.swing.JPanel();
-        btnConnect = new javax.swing.JButton();
-        btnRefresh = new javax.swing.JButton();
-        btnDuplicate = new javax.swing.JButton();
-        btnUSB = new javax.swing.JButton();
-        btnConnectWiFi = new javax.swing.JButton();
-        btnEnableTcp5555 = new javax.swing.JButton();
+        jPanel3 = new javax.swing.JPanel();
         spDevices = new javax.swing.JScrollPane();
         jListDevices = new javax.swing.JList<>();
+        btnDuplicate = new javax.swing.JButton();
+        btnUSB = new javax.swing.JButton();
+        jPanel1 = new javax.swing.JPanel();
+        btnConnectWiFi = new javax.swing.JButton();
+        btnRefresh = new javax.swing.JButton();
+        btnConnect = new javax.swing.JButton();
+        btnEnableTcp5555 = new javax.swing.JButton();
         panelControl = new javax.swing.JPanel();
         btnSendText = new javax.swing.JButton();
         chkSync = new javax.swing.JCheckBox();
@@ -466,42 +455,9 @@ if (targetCanvas == null) {
 
         panelDevicesList.setBorder(javax.swing.BorderFactory.createTitledBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1), "Devices"));
         panelDevicesList.setRequestFocusEnabled(false);
+        panelDevicesList.setLayout(new java.awt.GridLayout(2, 1, 5, 5));
 
-        jPanel1.setLayout(new java.awt.GridLayout(4, 0, 0, 15));
-
-        btnConnect.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnConnect.setText("Connect");
-        btnConnect.addActionListener(this::btnConnectActionPerformed);
-        jPanel1.add(btnConnect);
-
-        btnRefresh.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnRefresh.setText("Refresh Devices");
-        btnRefresh.addActionListener(this::btnRefreshActionPerformed);
-        jPanel1.add(btnRefresh);
-
-        btnDuplicate.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnDuplicate.setText("Duplicate HP");
-        btnDuplicate.addActionListener(this::btnDuplicateActionPerformed);
-        jPanel1.add(btnDuplicate);
-
-        btnUSB.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnUSB.setText("USB Debug");
-        btnUSB.addActionListener(this::btnUSBActionPerformed);
-        jPanel1.add(btnUSB);
-
-        btnConnectWiFi.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnConnectWiFi.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/wifi.png"))); // NOI18N
-        btnConnectWiFi.setText("Wi-Fi Debug");
-        btnConnectWiFi.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
-        btnConnectWiFi.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
-        btnConnectWiFi.addActionListener(this::btnConnectWiFiActionPerformed);
-
-        btnEnableTcp5555.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnEnableTcp5555.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/adb.png"))); // NOI18N
-        btnEnableTcp5555.setText("ADB");
-        btnEnableTcp5555.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
-        btnEnableTcp5555.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
-        btnEnableTcp5555.addActionListener(this::btnEnableTcp5555ActionPerformed);
+        jPanel3.setLayout(new java.awt.BorderLayout(5, 5));
 
         jListDevices.setModel(new javax.swing.AbstractListModel<String>() {
             String[] strings = { "Item 1", "Item 2", "Item 3", "Item 4", "Item 5" };
@@ -515,39 +471,56 @@ if (targetCanvas == null) {
         });
         spDevices.setViewportView(jListDevices);
 
-        javax.swing.GroupLayout panelDevicesListLayout = new javax.swing.GroupLayout(panelDevicesList);
-        panelDevicesList.setLayout(panelDevicesListLayout);
-        panelDevicesListLayout.setHorizontalGroup(
-            panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(panelDevicesListLayout.createSequentialGroup()
-                .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(panelDevicesListLayout.createSequentialGroup()
-                        .addContainerGap()
-                        .addComponent(btnConnectWiFi)
-                        .addGap(32, 32, 32)
-                        .addComponent(btnEnableTcp5555, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                    .addComponent(spDevices))
-                .addGap(124, 124, 124))
-            .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelDevicesListLayout.createSequentialGroup()
-                    .addContainerGap(229, Short.MAX_VALUE)
-                    .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addContainerGap()))
-        );
-        panelDevicesListLayout.setVerticalGroup(
-            panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(panelDevicesListLayout.createSequentialGroup()
-                .addComponent(spDevices, javax.swing.GroupLayout.PREFERRED_SIZE, 66, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(29, 29, 29)
-                .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addComponent(btnEnableTcp5555)
-                    .addComponent(btnConnectWiFi))
-                .addContainerGap())
-            .addGroup(panelDevicesListLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                .addGroup(panelDevicesListLayout.createSequentialGroup()
-                    .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, 144, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addGap(0, 6, Short.MAX_VALUE)))
-        );
+        jPanel3.add(spDevices, java.awt.BorderLayout.CENTER);
+
+        btnDuplicate.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnDuplicate.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/duplicat.png"))); // NOI18N
+        btnDuplicate.setText("Duplicate HP");
+        btnDuplicate.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
+        btnDuplicate.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnDuplicate.addActionListener(this::btnDuplicateActionPerformed);
+        jPanel3.add(btnDuplicate, java.awt.BorderLayout.LINE_END);
+
+        btnUSB.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnUSB.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/search.png"))); // NOI18N
+        btnUSB.setText("USB Debug");
+        btnUSB.addActionListener(this::btnUSBActionPerformed);
+        jPanel3.add(btnUSB, java.awt.BorderLayout.PAGE_END);
+
+        panelDevicesList.add(jPanel3);
+
+        jPanel1.setLayout(new java.awt.GridLayout(2, 0, 5, 5));
+
+        btnConnectWiFi.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnConnectWiFi.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/wifi.png"))); // NOI18N
+        btnConnectWiFi.setText("Wi-Fi Debug");
+        btnConnectWiFi.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
+        btnConnectWiFi.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnConnectWiFi.addActionListener(this::btnConnectWiFiActionPerformed);
+        jPanel1.add(btnConnectWiFi);
+
+        btnRefresh.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnRefresh.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/refresh.png"))); // NOI18N
+        btnRefresh.setText("Reset Devices");
+        btnRefresh.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
+        btnRefresh.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnRefresh.addActionListener(this::btnRefreshActionPerformed);
+        jPanel1.add(btnRefresh);
+
+        btnConnect.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnConnect.setText("Connect");
+        btnConnect.addActionListener(this::btnConnectActionPerformed);
+        jPanel1.add(btnConnect);
+
+        btnEnableTcp5555.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnEnableTcp5555.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/adb.png"))); // NOI18N
+        btnEnableTcp5555.setText("ADB");
+        btnEnableTcp5555.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
+        btnEnableTcp5555.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnEnableTcp5555.addActionListener(this::btnEnableTcp5555ActionPerformed);
+        jPanel1.add(btnEnableTcp5555);
+
+        panelDevicesList.add(jPanel1);
 
         panelDevices.add(panelDevicesList);
 
@@ -629,22 +602,20 @@ if (targetCanvas == null) {
         panelBulkLayout.setHorizontalGroup(
             panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelBulkLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
-                    .addComponent(spLog, javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(panelBulkLayout.createSequentialGroup()
-                        .addGap(0, 0, Short.MAX_VALUE)
-                        .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                .addGap(44, 44, 44))
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(spLog)
+                    .addComponent(jPanel2, javax.swing.GroupLayout.DEFAULT_SIZE, 332, Short.MAX_VALUE))
+                .addContainerGap())
         );
         panelBulkLayout.setVerticalGroup(
             panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelBulkLayout.createSequentialGroup()
                 .addContainerGap()
                 .addComponent(spLog, javax.swing.GroupLayout.PREFERRED_SIZE, 152, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(65, Short.MAX_VALUE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, 27, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(36, Short.MAX_VALUE))
         );
 
         panelDevices.add(panelBulk);
@@ -653,9 +624,8 @@ if (targetCanvas == null) {
         panelNav.setPreferredSize(new java.awt.Dimension(325, 70));
 
         btnRecentAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnRecentAll.setIcon(new javax.swing.ImageIcon(getClass().getResource("/menu.png"))); // NOI18N
-        btnRecentAll.setText("Recent");
-        btnRecentAll.setDisabledIcon(null);
+        btnRecentAll.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/view.png"))); // NOI18N
+        btnRecentAll.setText("View");
         btnRecentAll.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
         btnRecentAll.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
         btnRecentAll.addActionListener(this::btnRecentAllActionPerformed);
@@ -683,9 +653,9 @@ if (targetCanvas == null) {
             .addGroup(panelNavLayout.createSequentialGroup()
                 .addGap(14, 14, 14)
                 .addComponent(btnRecentAll)
-                .addGap(39, 39, 39)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 51, Short.MAX_VALUE)
                 .addComponent(btnHomeAll)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 60, Short.MAX_VALUE)
+                .addGap(48, 48, 48)
                 .addComponent(btnBackAll)
                 .addGap(14, 14, 14))
         );
@@ -695,8 +665,10 @@ if (targetCanvas == null) {
                 .addGap(9, 9, 9)
                 .addGroup(panelNavLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addComponent(btnRecentAll)
-                    .addComponent(btnHomeAll)
                     .addComponent(btnBackAll)))
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelNavLayout.createSequentialGroup()
+                .addContainerGap()
+                .addComponent(btnHomeAll))
         );
 
         panelDevices.add(panelNav);
@@ -737,14 +709,12 @@ if (targetCanvas == null) {
         );
         panelTopBarLayout.setVerticalGroup(
             panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(panelTopBarLayout.createSequentialGroup()
-                .addGroup(panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jLabel2)
-                    .addComponent(jLabel3)
-                    .addComponent(jLabel1))
-                .addGap(0, 8, Short.MAX_VALUE))
+            .addGroup(panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addComponent(jLabel2)
+                .addComponent(jLabel3)
+                .addComponent(jLabel1))
         );
 
         getContentPane().add(panelTopBar, java.awt.BorderLayout.NORTH);
@@ -781,7 +751,14 @@ if (targetCanvas == null) {
 
     private void jListDevicesMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_jListDevicesMouseClicked
         if (evt.getClickCount() == 2) {
-            startScrcpyMirror(jListDevices.getSelectedValue(), false);
+            // Dapatkan index item berdasarkan koordinat mouse
+            int index = jListDevices.locationToIndex(evt.getPoint());
+
+            // Pastikan klik benar-benar di atas sebuah item yang valid
+            if (index >= 0 && jListDevices.getCellBounds(index, index).contains(evt.getPoint())) {
+                String selectedID = jListDevices.getModel().getElementAt(index);
+                startScrcpyMirror(selectedID, false);
+            }
         }
     }//GEN-LAST:event_jListDevicesMouseClicked
 
@@ -831,8 +808,14 @@ if (targetCanvas == null) {
                 scrcpyService.stopAll();
                 deviceSlotMap.clear();
                 Thread.sleep(800);
-                SwingUtilities.invokeLater(this::refreshDeviceList);
+
+                // 🔥 CARI DATANYA DULU, BARU LEMPAR KE UI
+                List<String> devices = adbService.getConnectedDevices();
+                SwingUtilities.invokeLater(() -> refreshDeviceList(devices));
+
             } catch (Exception e) {
+                log("Gagal refresh: " + e.getMessage());
+                Thread.currentThread().interrupt();
             }
         });
     }//GEN-LAST:event_btnRefreshActionPerformed
@@ -921,6 +904,7 @@ if (targetCanvas == null) {
     private javax.swing.JList<String> jListDevices;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JPanel jPanel2;
+    private javax.swing.JPanel jPanel3;
     private javax.swing.JPanel panelBulk;
     private javax.swing.JPanel panelControl;
     private javax.swing.JPanel panelDevices;

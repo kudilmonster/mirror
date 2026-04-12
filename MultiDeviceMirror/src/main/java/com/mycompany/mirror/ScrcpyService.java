@@ -11,7 +11,6 @@ public class ScrcpyService {
     private final ExecutorService executor; // Untuk menjalankan di background
     private final MainDashboard dashboard; // Untuk kirim log ke UI
     private final Map<String, Process> runningProcesses = new ConcurrentHashMap<>();
-private final Map<String, Process> processes = new HashMap<>();
     // 🔥 Constructor baru: Menerima data dari MainDashboard
     public ScrcpyService(String executable, ExecutorService executor, MainDashboard dashboard) {
         this.executable = executable;
@@ -39,7 +38,8 @@ ProcessBuilder pb = new ProcessBuilder(
     "--max-fps", "15",                // 3. 15-20 FPS. Agak kaku, tapi PC Anda akan sangat berterima kasih.
     "--no-key-repeat",                // 4. Mencegah spam input
     "--no-clipboard-autosync"        // 5. Matikan auto-sync copy-paste antara HP dan PC (mengurangi proses background)
-    //"--turn-screen-off"               // 6. Matikan layar fisik HP saat di-mirror (Mencegah HP panas/throttling yang bikin lag)
+    //"--turn-screen-off"                 // 6. Matikan layar fisik HP saat di-mirror (Mencegah HP panas/throttling yang bikin lag)
+
 );
 
                 // Hapus baris --encoder karena itu penyebab utamanya
@@ -56,21 +56,33 @@ ProcessBuilder pb = new ProcessBuilder(
     }
 
     public void stopAll() {
-        runningProcesses.values().forEach(Process::destroy);
+        // 1. Matikan semua proses Scrcpy dengan aman
+        runningProcesses.forEach((title, process) -> {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly(); // 🔥 Gunakan destroyForcibly agar benar-benar mati
+            }
+        });
         runningProcesses.clear();
-    }
 
-    public void stopBySlot(int index) {
-    String titlePrefix = "Mirror_" + index;
-
-    processes.entrySet().removeIf(entry -> {
-        if (entry.getKey().contains(titlePrefix)) {
-            entry.getValue().destroy();
-            return true;
+        // 2. Perintahkan Dashboard untuk menghapus komponen Grid dari memori
+        if (dashboard != null) {
+            dashboard.clearGrid();
         }
-        return false;
-    });
-}
+    }
+    
+    // ==========================================================
+    // Menutup HANYA satu sesi (dipanggil saat tombol X diklik)
+    // ==========================================================
+    public void stopInstance(String windowTitle) {
+        Process p = runningProcesses.remove(windowTitle);
+        if (p != null && p.isAlive()) {
+            p.destroyForcibly(); // Matikan paksa .exe scrcpy tersebut
+            dashboard.log("Berhasil mematikan: " + windowTitle);
+        }
+    }
+    
+
+
     
     // ==========================================================
     // JNA EMBEDDING LOGIC (PINDAHAN DARI MAIN DASHBOARD)
