@@ -40,7 +40,6 @@ public class MainDashboard extends JFrame {
         }
     }
 
-    //private int nextSlotIndex = 0;
     // ================= CONFIG =================
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
     private final String scrcpyExecutable = basePath + "scrcpy.exe";
@@ -56,79 +55,89 @@ public class MainDashboard extends JFrame {
     // Tambahkan ini untuk mengunci HP ke slot spesifik
     private final Map<String, Integer> deviceSlotMap = new HashMap<>();
     public final ExecutorService executor = Executors.newFixedThreadPool(10);
+    public ViewerFrame viewerFrame;
 
-    // ================= CONSTRUCTOR =================
+// ================= CONSTRUCTOR =================
     public MainDashboard() {
         initComponents();
+
+        // 🔥 1. "Curi" panelLayar bawaan NetBeans, jadikan window baru!
+        viewerFrame = new ViewerFrame(panelLayar);
+
+        // 2. Inisialisasi service
         initServices();
+
+        // 3. Rapikan UI Dashboard
         initUI();
         startAutoDeviceWatcher();
     }
 
     private void initServices() {
         scrcpyService = new ScrcpyService(scrcpyExecutable, executor, this);
-        adbService = new AdbService(this, adbExecutable, executor); // 🔥 INISIALISASI ADB
-        syncService = new SyncService(this, panelLayar, chkSync); // INISIALISASI SYNC
+        adbService = new AdbService(this, adbExecutable, executor);
+
+        // 🔥 PENTING: Berikan viewerFrame ke SyncService (bukan "this" lagi)
+        // Agar kotak merah pelacak kursor muncul di window yang benar
+        syncService = new SyncService(this, viewerFrame, panelLayar, chkSync);
     }
 
     private void initUI() {
         // Bersihkan layout bawaan NetBeans
         getContentPane().removeAll();
         getContentPane().setLayout(new BorderLayout());
-        setExtendedState(JFrame.MAXIMIZED_BOTH);
 
-        // 🔥 BUNGKUS PANEL LAYAR DENGAN SCROLLPANE
-        JScrollPane scrollLayar = new JScrollPane(panelLayar);
-        scrollLayar.setBorder(BorderFactory.createEmptyBorder()); // Hilangkan garis tepi agar bersih
-        scrollLayar.getVerticalScrollBar().setUnitIncrement(20);  // Bikin scroll mouse lebih cepat & mulus
-        scrollLayar.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER); // Kunci agar tidak bisa geser kiri-kanan
-
-        // Pasang kembali panel ke posisinya
+        // 🔥 Dashboard sekarang HANYA berisi TopBar dan Devices
         getContentPane().add(panelTopBar, BorderLayout.NORTH);
-        getContentPane().add(panelDevices, BorderLayout.WEST);
-        getContentPane().add(scrollLayar, BorderLayout.CENTER);  // Masukkan ScrollPane ke tengah, bukan panelLayar langsung
+        getContentPane().add(panelDevices, BorderLayout.CENTER); // Ubah jadi CENTER agar penuh
 
         // Styling sisa panel
         panelDevices.setBackground(Color.LIGHT_GRAY);
-        panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 1, 10, 1));
-
-        panelLayar.setBorder(BorderFactory.createEmptyBorder(10, 1, 10, 1));
-        panelLayar.setBackground(Color.LIGHT_GRAY);
-
+        panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 1, 10, 2));
         setupLogStyle();
-        // Jalankan di background agar UI tidak freeze saat aplikasi baru dibuka
-        executor.submit(() -> {
-            List<String> initialDevices = adbService.getConnectedDevices();
-            refreshDeviceList(initialDevices);
-        });
 
+        // Karena layar dipisah, kecilkan ukuran MainDashboard
+        setSize(380, 700);
         getContentPane().revalidate();
         getContentPane().repaint();
 
+        // 🔥 Tampilkan layar kedua (Viewer)
+        viewerFrame.setVisible(true);
+
         // ======== INIT FITUR CLONE/SYNC ========
-        // Pantau pergerakan jendela aplikasi agar kaca overlay tidak tertinggal
-        this.addComponentListener(new ComponentAdapter() {
+        // 🔥 Pindahkan Listener dari "this" ke "viewerFrame"
+        viewerFrame.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
-            public void componentMoved(ComponentEvent e) {
+            public void componentMoved(java.awt.event.ComponentEvent e) {
                 if (syncService != null) {
                     syncService.updatePosition();
                 }
             }
 
             @Override
-            public void componentResized(ComponentEvent e) {
+            public void componentResized(java.awt.event.ComponentEvent e) {
                 if (syncService != null) {
                     syncService.updatePosition();
                 }
             }
         });
 
-        addWindowListener(new WindowAdapter() {
+        // Event tutup aplikasi (dari Dashboard)
+        addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
-            public void windowClosing(WindowEvent e) {
+            public void windowClosing(java.awt.event.WindowEvent e) {
                 log("Mematikan semua sistem...");
                 shutdown();
-                System.exit(0); // Tutup Java sepenuhnya
+                System.exit(0);
+            }
+        });
+
+        // Event tutup aplikasi (jika user memaksa close window Viewer)
+        viewerFrame.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                log("Mematikan semua sistem...");
+                shutdown();
+                System.exit(0);
             }
         });
     }
@@ -143,7 +152,7 @@ public class MainDashboard extends JFrame {
     // ==========================================================
     private void syncGridPanels(int requiredCount) {
         int currentCount = panelLayar.getComponentCount();
-        panelLayar.setLayout(new java.awt.GridLayout(0, 3, 10, 10));
+        panelLayar.setLayout(new java.awt.GridLayout(0, 4, 10, 10));
 
         if (currentCount < requiredCount) {
             for (int i = currentCount; i < requiredCount; i++) {
@@ -449,6 +458,7 @@ public class MainDashboard extends JFrame {
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setName("MainFrame"); // NOI18N
         setPreferredSize(new java.awt.Dimension(1000, 600));
+        setResizable(false);
 
         panelDevices.setPreferredSize(new java.awt.Dimension(345, 640));
         panelDevices.setLayout(new javax.swing.BoxLayout(panelDevices, javax.swing.BoxLayout.Y_AXIS));

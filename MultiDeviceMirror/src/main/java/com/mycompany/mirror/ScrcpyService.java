@@ -80,10 +80,7 @@ ProcessBuilder pb = new ProcessBuilder(
             dashboard.log("Berhasil mematikan: " + windowTitle);
         }
     }
-    
-
-
-    
+        
     // ==========================================================
     // JNA EMBEDDING LOGIC (PINDAHAN DARI MAIN DASHBOARD)
     // ==========================================================
