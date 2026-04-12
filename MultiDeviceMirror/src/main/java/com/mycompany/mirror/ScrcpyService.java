@@ -11,7 +11,7 @@ public class ScrcpyService {
     private final ExecutorService executor; // Untuk menjalankan di background
     private final MainDashboard dashboard; // Untuk kirim log ke UI
     private final Map<String, Process> runningProcesses = new ConcurrentHashMap<>();
-
+private final Map<String, Process> processes = new HashMap<>();
     // 🔥 Constructor baru: Menerima data dari MainDashboard
     public ScrcpyService(String executable, ExecutorService executor, MainDashboard dashboard) {
         this.executable = executable;
@@ -60,6 +60,18 @@ ProcessBuilder pb = new ProcessBuilder(
         runningProcesses.clear();
     }
 
+    public void stopBySlot(int index) {
+    String titlePrefix = "Mirror_" + index;
+
+    processes.entrySet().removeIf(entry -> {
+        if (entry.getKey().contains(titlePrefix)) {
+            entry.getValue().destroy();
+            return true;
+        }
+        return false;
+    });
+}
+    
     // ==========================================================
     // JNA EMBEDDING LOGIC (PINDAHAN DARI MAIN DASHBOARD)
     // ==========================================================

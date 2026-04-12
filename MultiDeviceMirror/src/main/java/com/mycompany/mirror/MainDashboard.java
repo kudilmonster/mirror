@@ -17,6 +17,7 @@ public class MainDashboard extends JFrame {
     // ================= CUSTOM COMPONENTS =================
     // Class untuk membuat panel dengan sudut melengkung
     class RoundedPanel extends JPanel {
+
         private int cornerRadius = 15;
 
         public RoundedPanel(int radius) {
@@ -32,7 +33,7 @@ public class MainDashboard extends JFrame {
             int width = getWidth();
             int height = getHeight();
             Graphics2D graphics = (Graphics2D) g;
-            
+
             graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             graphics.setColor(getBackground());
             graphics.fillRoundRect(0, 0, width - 1, height - 1, arcs.width, arcs.height);
@@ -41,10 +42,9 @@ public class MainDashboard extends JFrame {
 
     //private int nextSlotIndex = 0;
     // ================= CONFIG =================
-    
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
     private final String scrcpyExecutable = basePath + "scrcpy.exe";
-    public final String adbExecutable = basePath + "adb.exe";     
+    public final String adbExecutable = basePath + "adb.exe";
     //==================================================
     private ScrcpyService scrcpyService;
     private SyncService syncService;
@@ -64,19 +64,19 @@ public class MainDashboard extends JFrame {
         initUI();
         startAutoDeviceWatcher();
     }
-    
+
     private void initServices() {
         scrcpyService = new ScrcpyService(scrcpyExecutable, executor, this);
         adbService = new AdbService(this, adbExecutable, executor); // 🔥 INISIALISASI ADB
         syncService = new SyncService(this, panelLayar, chkSync); // INISIALISASI SYNC
     }
-    
+
     private void initUI() {
         // Bersihkan layout bawaan NetBeans
         getContentPane().removeAll();
         getContentPane().setLayout(new BorderLayout());
         setExtendedState(JFrame.MAXIMIZED_BOTH);
-        
+
         // 🔥 BUNGKUS PANEL LAYAR DENGAN SCROLLPANE
         JScrollPane scrollLayar = new JScrollPane(panelLayar);
         scrollLayar.setBorder(BorderFactory.createEmptyBorder()); // Hilangkan garis tepi agar bersih
@@ -100,7 +100,7 @@ public class MainDashboard extends JFrame {
 
         getContentPane().revalidate();
         getContentPane().repaint();
-        
+
         // ======== INIT FITUR CLONE/SYNC ========
         // Pantau pergerakan jendela aplikasi agar kaca overlay tidak tertinggal
         this.addComponentListener(new ComponentAdapter() {
@@ -128,39 +128,107 @@ public class MainDashboard extends JFrame {
             }
         });
     }
-    
+
     private void shutdown() {
         scrcpyService.stopAll();
         executor.shutdownNow();
     }
-    
-    // ==========================================================
-    // DYNAMIC GRID MAKER
-    // ==========================================================
-    private void syncGridPanels(int requiredCount) {
-        int currentCount = panelLayar.getComponentCount();
 
-        // 🔥 Kunci permanen di 3 kolom
-        panelLayar.setLayout(new java.awt.GridLayout(0, 3, 10, 10));
+private void closeSlot(int index) {
+    log("Menutup slot: " + index);
 
-        if (currentCount < requiredCount) {
-            for (int i = currentCount; i < requiredCount; i++) {
-                JPanel cell = new JPanel(new java.awt.BorderLayout());
-                cell.setBackground(java.awt.Color.BLACK);
-                cell.setBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(50, 50, 50)));
+    // Cari device di slot ini
+    String keyToRemove = null;
 
-                java.awt.Canvas c = new java.awt.Canvas();
-                c.setBackground(java.awt.Color.BLACK);
-                cell.add(c, java.awt.BorderLayout.CENTER);
-
-                panelLayar.add(cell);
-            }
+    for (Map.Entry<String, Integer> entry : deviceSlotMap.entrySet()) {
+        if (entry.getValue() == index) {
+            keyToRemove = entry.getKey();
+            break;
         }
-
-        panelLayar.revalidate();
-        panelLayar.repaint();
     }
-    
+
+    // Stop scrcpy
+    if (keyToRemove != null) {
+        scrcpyService.stopBySlot(index);
+        deviceSlotMap.remove(keyToRemove);
+    }
+
+    // Reset UI
+    JPanel cell = (JPanel) panelLayar.getComponent(index);
+    cell.removeAll();
+
+    JPanel header = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 2));
+    header.setOpaque(false);
+
+    JButton btnClose = new JButton("✕");
+    btnClose.setForeground(Color.WHITE);
+    btnClose.setBackground(new Color(200, 50, 50));
+    btnClose.setFocusPainted(false);
+
+    btnClose.addActionListener(e -> closeSlot(index));
+
+    Canvas canvas = new Canvas();
+    canvas.setBackground(Color.BLACK);
+
+    header.add(btnClose);
+
+    cell.add(header, BorderLayout.NORTH);
+    cell.add(canvas, BorderLayout.CENTER);
+
+    cell.revalidate();
+    cell.repaint();
+}
+
+private void syncGridPanels(int requiredCount) {
+    int currentCount = panelLayar.getComponentCount();
+
+    panelLayar.setLayout(new GridLayout(0, 3, 10, 10));
+
+    if (currentCount < requiredCount) {
+        for (int i = currentCount; i < requiredCount; i++) {
+
+            JPanel cell = new JPanel(new BorderLayout());
+            cell.setBackground(Color.BLACK);
+            cell.setBorder(BorderFactory.createLineBorder(new Color(50, 50, 50)));
+
+            // ===== HEADER (CLOSE BUTTON) =====
+            JPanel header = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 2));
+            header.setOpaque(false);
+
+            JButton btnClose = new JButton("✕");
+            btnClose.setForeground(Color.WHITE);
+            btnClose.setBackground(new Color(200, 50, 50));
+            btnClose.setFocusPainted(false);
+
+            int index = i;
+            btnClose.addActionListener(e -> closeSlot(index));
+
+            header.add(btnClose);
+
+            // ===== CANVAS =====
+            Canvas canvas = new Canvas();
+            canvas.setBackground(Color.BLACK);
+
+            cell.add(header, BorderLayout.NORTH);
+            cell.add(canvas, BorderLayout.CENTER);
+
+            panelLayar.add(cell);
+        }
+    }
+
+    panelLayar.revalidate();
+    panelLayar.repaint();
+}
+
+private Canvas getCanvasFromCell(JPanel cell) {
+    for (Component comp : cell.getComponents()) {
+        if (comp instanceof Canvas) {
+            return (Canvas) comp;
+        }
+    }
+    return null;
+}
+
     // ==========================================================
     // CORE MIRROR: Sekarang mendukung Duplikasi (Multi-Instance)
     // ==========================================================
@@ -197,8 +265,13 @@ public class MainDashboard extends JFrame {
             syncGridPanels(targetIndex + 1);
 
             // Ambil Canvas dari kotak target
-            JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            Canvas targetCanvas = (Canvas) cell.getComponent(0);
+JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
+Canvas targetCanvas = getCanvasFromCell(cell);
+
+if (targetCanvas == null) {
+    log("Canvas tidak ditemukan!");
+    return;
+}
 
             // 4. Jalankan Scrcpy di background thread
             executor.submit(() -> {
@@ -222,7 +295,7 @@ public class MainDashboard extends JFrame {
             });
         });
     }
-    
+
     // ==========================================================
     // FITUR DUPLIKAT: Membuka HP yang sama di slot baru
     // ==========================================================
@@ -266,9 +339,13 @@ public class MainDashboard extends JFrame {
             deviceSlotMap.put(finalCloneId, targetIndex);
             syncGridPanels(targetIndex + 1);
 
-            JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            Canvas targetCanvas = (Canvas) cell.getComponent(0);
+JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
+Canvas targetCanvas = getCanvasFromCell(cell);
 
+if (targetCanvas == null) {
+    log("Canvas tidak ditemukan!");
+    return;
+}
             executor.submit(() -> {
                 try {
                     // Gunakan judul jendela unik agar JNA tidak bingung
@@ -287,7 +364,7 @@ public class MainDashboard extends JFrame {
             });
         });
     }
-    
+
     public void refreshDeviceList() {
         // 🔥 FIX: Panggil melalui adbService
         List<String> devices = adbService.getConnectedDevices();
@@ -301,7 +378,7 @@ public class MainDashboard extends JFrame {
         panelLayar.repaint();
         log("Device ditemukan: " + devices.size());
     }
-    
+
     // ================= UTIL =================
     public void log(String msg) {
         SwingUtilities.invokeLater(() -> {
@@ -309,14 +386,14 @@ public class MainDashboard extends JFrame {
             txtLog.setCaretPosition(txtLog.getDocument().getLength());
         });
     }
-    
+
     private void setupLogStyle() {
         txtLog.setEditable(false);
         txtLog.setBackground(Color.BLACK);
         txtLog.setForeground(new Color(50, 255, 50));
         txtLog.setFont(new Font("Consolas", Font.PLAIN, 10));
     }
-    
+
     private void startAutoDeviceWatcher() {
         executor.submit(() -> {
             while (true) {
