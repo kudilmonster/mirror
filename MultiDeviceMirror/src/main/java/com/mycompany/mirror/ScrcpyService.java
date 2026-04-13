@@ -33,8 +33,9 @@ public class ScrcpyService {
                     "--window-title", windowTitle,
                     "--always-on-top",
                     "--no-audio-playback",
+                    "--record=file.mkv",
                     "--port", String.valueOf(randomPort),
-                    "--max-size", "720",
+                    "--max-size", "480",
                     "--video-bit-rate", "1M", // 1 Mbps sudah cukup jernih
                     "--max-fps", "15" // 15 FPS untuk PC yang lebih berterima kasih
                 ));

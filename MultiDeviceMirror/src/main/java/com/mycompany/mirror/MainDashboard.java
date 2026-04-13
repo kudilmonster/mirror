@@ -414,8 +414,8 @@ public class MainDashboard extends JFrame {
         spLog = new javax.swing.JScrollPane();
         txtLog = new javax.swing.JTextArea();
         jPanel2 = new javax.swing.JPanel();
-        btnRebootAll = new javax.swing.JButton();
-        btnScreenshotAll = new javax.swing.JButton();
+        btnReboot = new javax.swing.JButton();
+        btnScreenshot = new javax.swing.JButton();
         btnRecordManager = new javax.swing.JButton();
         btnInstallAPK = new javax.swing.JButton();
         panelNav = new javax.swing.JPanel();
@@ -582,7 +582,7 @@ public class MainDashboard extends JFrame {
                         .addGap(15, 15, 15))
                     .addGroup(panelControlLayout.createSequentialGroup()
                         .addComponent(chkSync)
-                        .addContainerGap(236, Short.MAX_VALUE))))
+                        .addContainerGap(240, Short.MAX_VALUE))))
         );
         panelControlLayout.setVerticalGroup(
             panelControlLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -613,18 +613,19 @@ public class MainDashboard extends JFrame {
         txtLog.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
         spLog.setViewportView(txtLog);
 
-        jPanel2.setLayout(new java.awt.GridLayout(0, 3, 1, 0));
+        jPanel2.setLayout(new java.awt.GridLayout(0, 4, 3, 5));
 
-        btnRebootAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnRebootAll.setText("Reboot All");
-        btnRebootAll.addActionListener(this::btnRebootAllActionPerformed);
-        jPanel2.add(btnRebootAll);
+        btnReboot.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnReboot.setText("Reboot");
+        btnReboot.addActionListener(this::btnRebootActionPerformed);
+        jPanel2.add(btnReboot);
 
-        btnScreenshotAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnScreenshotAll.setText("Screenshot All");
-        btnScreenshotAll.addActionListener(this::btnScreenshotAllActionPerformed);
-        jPanel2.add(btnScreenshotAll);
+        btnScreenshot.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnScreenshot.setText("Screenshot");
+        btnScreenshot.addActionListener(this::btnScreenshotActionPerformed);
+        jPanel2.add(btnScreenshot);
 
+        btnRecordManager.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnRecordManager.setText("Record");
         btnRecordManager.addActionListener(this::btnRecordManagerActionPerformed);
         jPanel2.add(btnRecordManager);
@@ -641,10 +642,8 @@ public class MainDashboard extends JFrame {
             .addGroup(panelBulkLayout.createSequentialGroup()
                 .addContainerGap()
                 .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(panelBulkLayout.createSequentialGroup()
-                        .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(0, 37, Short.MAX_VALUE))
-                    .addComponent(spLog))
+                    .addComponent(spLog, javax.swing.GroupLayout.DEFAULT_SIZE, 331, Short.MAX_VALUE)
+                    .addComponent(jPanel2, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
                 .addContainerGap())
         );
         panelBulkLayout.setVerticalGroup(
@@ -653,7 +652,7 @@ public class MainDashboard extends JFrame {
                 .addComponent(spLog, javax.swing.GroupLayout.PREFERRED_SIZE, 152, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(12, 12, 12)
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                .addContainerGap(83, Short.MAX_VALUE))
         );
 
         panelDevices.add(panelBulk);
@@ -691,7 +690,7 @@ public class MainDashboard extends JFrame {
             .addGroup(panelNavLayout.createSequentialGroup()
                 .addGap(14, 14, 14)
                 .addComponent(btnRecentAll)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 47, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 51, Short.MAX_VALUE)
                 .addComponent(btnHomeAll)
                 .addGap(48, 48, 48)
                 .addComponent(btnBackAll)
@@ -749,18 +748,31 @@ public class MainDashboard extends JFrame {
         }
     }//GEN-LAST:event_btnConnectActionPerformed
 
-    private void btnRebootAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRebootAllActionPerformed
-        List<String> devices = adbService.getConnectedDevices();
-        if (!devices.isEmpty() && JOptionPane.showConfirmDialog(this, "Reboot " + devices.size() + " HP?", "Reboot", JOptionPane.YES_NO_OPTION) == 0) {
-            adbService.rebootMassal(devices);
+    private void btnRebootActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRebootActionPerformed
+        String selectedID = jListDevices.getSelectedValue();
+        if (selectedID != null) {
+            if (JOptionPane.showConfirmDialog(this, "Reboot HP " + selectedID + "?", "Konfirmasi Reboot", JOptionPane.YES_NO_OPTION) == 0) {
+                adbService.rebootMassal(Collections.singletonList(selectedID));
+                log("🔄 Memulai proses reboot untuk: " + selectedID);
+            }
+        } else {
+            JOptionPane.showMessageDialog(this, "Pilih HP di list perangkat terlebih dahulu!");
         }
-    }//GEN-LAST:event_btnRebootAllActionPerformed
+    }//GEN-LAST:event_btnRebootActionPerformed
 
-    private void btnScreenshotAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScreenshotAllActionPerformed
-        String folderPath = System.getProperty("user.home") + File.separator + "Documents" + File.separator + "Mirror_Screenshots";
-        new File(folderPath).mkdirs();
-        adbService.screenshotMassal(folderPath, adbService.getConnectedDevices());
-    }//GEN-LAST:event_btnScreenshotAllActionPerformed
+    private void btnScreenshotActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnScreenshotActionPerformed
+        String selectedID = jListDevices.getSelectedValue();
+        if (selectedID != null) {
+            String folderPath = System.getProperty("user.home") + File.separator + "Documents" + File.separator + "Mirror_Screenshots";
+            new File(folderPath).mkdirs();
+            
+            // Masukkan 1 device yang dipilih ke dalam list tunggal
+            adbService.screenshotMassal(folderPath, Collections.singletonList(selectedID));
+            log("📸 Screenshot diambil untuk: " + selectedID);
+        } else {
+            JOptionPane.showMessageDialog(this, "Pilih HP di list perangkat terlebih dahulu!");
+        }
+    }//GEN-LAST:event_btnScreenshotActionPerformed
 
     private void btnInstallAPKActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnInstallAPKActionPerformed
         JFileChooser chooser = new JFileChooser();
@@ -893,11 +905,11 @@ public class MainDashboard extends JFrame {
     private javax.swing.JButton btnEnableTcp5555;
     private javax.swing.JButton btnHomeAll;
     private javax.swing.JButton btnInstallAPK;
-    private javax.swing.JButton btnRebootAll;
+    private javax.swing.JButton btnReboot;
     private javax.swing.JButton btnRecentAll;
     private javax.swing.JButton btnRecordManager;
     private javax.swing.JButton btnRefresh;
-    private javax.swing.JButton btnScreenshotAll;
+    private javax.swing.JButton btnScreenshot;
     private javax.swing.JButton btnSendText;
     private javax.swing.JButton btnUSB;
     private javax.swing.JCheckBox chkSync;
