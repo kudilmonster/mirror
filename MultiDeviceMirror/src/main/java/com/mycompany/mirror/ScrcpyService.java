@@ -34,7 +34,7 @@ public class ScrcpyService {
                     "--always-on-top",
                     "--no-audio-playback",
                     "--port", String.valueOf(randomPort),
-                    "--max-size", "480",
+                    "--max-size", "720",
                     "--video-bit-rate", "1M", // 1 Mbps sudah cukup jernih
                     "--max-fps", "15" // 15 FPS untuk PC yang lebih berterima kasih
                 ));

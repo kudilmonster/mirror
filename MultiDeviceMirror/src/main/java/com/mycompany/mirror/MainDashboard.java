@@ -2,21 +2,19 @@ package com.mycompany.mirror;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.*;
 import java.io.*;
-import java.nio.file.Paths;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import javax.swing.filechooser.FileNameExtensionFilter;
 
 public class MainDashboard extends JFrame {
 
+    private int mouseX, mouseY;
     // ================= CUSTOM COMPONENTS =================
     // Class untuk membuat panel dengan sudut melengkung
+
     class RoundedPanel extends JPanel {
 
         private int cornerRadius = 15;
@@ -41,61 +39,35 @@ public class MainDashboard extends JFrame {
         }
     }
 
-    public javax.swing.JList<String> getJListDevices() {
-        return jListDevices;
-    }
-    // ================= CONFIG =================
+    // ================= CONFIG & SERVICES =================
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
     private final String scrcpyExecutable = basePath + "scrcpy.exe";
     public final String adbExecutable = basePath + "adb.exe";
-    //==================================================
+
     public ScrcpyService scrcpyService;
     private SyncService syncService;
     public AdbService adbService;
 
     // ================= STATE =================
-    private final Set<String> activeDevices = new HashSet<>();
     private final Set<String> lastDevices = new HashSet<>();
-    // Tambahkan ini untuk mengunci HP ke slot spesifik
-    //private final Map<String, Integer> deviceSlotMap = new HashMap<>();
     private final Map<String, Integer> deviceSlotMap = new ConcurrentHashMap<>();
     public final ExecutorService executor = Executors.newFixedThreadPool(10);
+
+    private RecordControlFrame recordControlFrame;
     public ViewerFrame viewerFrame;
     private javax.swing.JCheckBox chkAutoRecord;
-    
-    public java.awt.Canvas getCanvasFromSlot(String windowTitle) {
-    try {
-        // Ambil index dari windowTitle (Misal: Mirror_2_ORIG -> index 2)
-        String[] parts = windowTitle.split("_");
-        int slotIndex = Integer.parseInt(parts[1]);
-        
-        // Ambil panel kotak di index tersebut
-        javax.swing.JPanel slotPanel = (javax.swing.JPanel) panelLayar.getComponent(slotIndex);
-        
-        // Cari komponen Canvas di dalam panel tersebut
-        for (java.awt.Component comp : slotPanel.getComponents()) {
-            if (comp instanceof java.awt.Canvas) {
-                return (java.awt.Canvas) comp;
-            }
-        }
-    } catch (Exception e) {
-        log("Gagal menemukan Canvas untuk " + windowTitle);
-    }
-    return null;
-}
+    public RoundedPanel panelLayar;
 
-// Tambahkan juga getter untuk Spinner jika belum ada
-public javax.swing.JSpinner getSpinX() { return spinX; }
-public javax.swing.JSpinner getSpinY() { return spinY; }
-
-
-
-// ================= CONSTRUCTOR =================
-
+    // ================= CONSTRUCTOR =================
     public MainDashboard() {
         initComponents();
+        // 🔥 GARANSI INISIALISASI: Jika NetBeans ikut menghapus panel ini dari UI, kita buat ulang!
+        if (panelLayar == null) {
+            panelLayar = new RoundedPanel(25);
+            panelLayar.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
+        }
 
-        // 🔥 1. "Curi" panelLayar bawaan NetBeans, jadikan window baru!
+        // 1. Inisialisasi layar Viewer yang terpisah
         viewerFrame = new ViewerFrame(panelLayar);
 
         // 2. Inisialisasi service
@@ -110,8 +82,7 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         scrcpyService = new ScrcpyService(scrcpyExecutable, executor, this);
         adbService = new AdbService(this, adbExecutable, executor);
 
-        // 🔥 PENTING: Berikan viewerFrame ke SyncService (bukan "this" lagi)
-        // Agar kotak merah pelacak kursor muncul di window yang benar
+        // Sinkronisasi input diberikan ke viewerFrame
         syncService = new SyncService(this, viewerFrame, panelLayar, chkSync);
     }
 
@@ -120,25 +91,25 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         getContentPane().removeAll();
         getContentPane().setLayout(new BorderLayout());
 
-        // 🔥 Dashboard sekarang HANYA berisi TopBar dan Devices
+        // Susun kembali panel
         getContentPane().add(panelTopBar, BorderLayout.NORTH);
-        getContentPane().add(panelDevices, BorderLayout.CENTER); // Ubah jadi CENTER agar penuh
+        getContentPane().add(panelDevices, BorderLayout.CENTER);
 
-        // Styling sisa panel
-        panelDevices.setBackground(Color.LIGHT_GRAY);
-        panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 1, 10, 2));
+        // Styling list device & log
+        panelTopBar.setBackground(Color.BLACK);
+        panelDevices.setBackground(Color.WHITE);
+        panelDevices.setBorder(BorderFactory.createEmptyBorder(10, 2, 10, 2));
         setupLogStyle();
 
-        // Karena layar dipisah, kecilkan ukuran MainDashboard
+        // Dashboard dikecilkan karena layar sudah dipisah
         setSize(380, 700);
         getContentPane().revalidate();
         getContentPane().repaint();
 
-        // 🔥 Tampilkan layar kedua (Viewer)
+        // Tampilkan layar kedua (Viewer)
         viewerFrame.setVisible(true);
 
-        // ======== INIT FITUR CLONE/SYNC ========
-        // 🔥 Pindahkan Listener dari "this" ke "viewerFrame"
+        // ======== EVENT LISTENERS ========
         viewerFrame.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
             public void componentMoved(java.awt.event.ComponentEvent e) {
@@ -155,40 +126,68 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
             }
         });
 
-        // Event tutup aplikasi (dari Dashboard)
-        addWindowListener(new java.awt.event.WindowAdapter() {
+        java.awt.event.WindowAdapter closeAdapter = new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
                 log("Mematikan semua sistem...");
                 shutdown();
                 System.exit(0);
             }
-        });
+        };
 
-        // Event tutup aplikasi (jika user memaksa close window Viewer)
-        viewerFrame.addWindowListener(new java.awt.event.WindowAdapter() {
-            @Override
-            public void windowClosing(java.awt.event.WindowEvent e) {
-                log("Mematikan semua sistem...");
-                shutdown();
-                System.exit(0);
-            }
-        });
+        addWindowListener(closeAdapter);
+        viewerFrame.addWindowListener(closeAdapter);
     }
 
-    //=====================================
+    // ================= GETTERS & SETTERS =================
+    public javax.swing.JList<String> getJListDevices() {
+        return jListDevices;
+    }
+
+    public javax.swing.JSpinner getSpinX() {
+        return spinX;
+    }
+
+    public javax.swing.JSpinner getSpinY() {
+        return spinY;
+    }
+
+    public void setRecordingEnabled(javax.swing.JCheckBox chk) {
+        this.chkAutoRecord = chk;
+    }
+
     public String getSelectedWindowTitle() {
         String deviceId = jListDevices.getSelectedValue();
         if (deviceId == null) {
             return null;
         }
 
-        // Kita cari windowTitle yang terdaftar di map berdasarkan deviceId
-        // Karena saat start kita pakai format "Mirror_index_ORIG"
         for (Map.Entry<String, Integer> entry : deviceSlotMap.entrySet()) {
             if (entry.getKey().equals(deviceId)) {
                 return "Mirror_" + entry.getValue() + "_ORIG";
             }
+        }
+        return null;
+    }
+
+    public java.awt.Canvas getCanvasFromSlot(String windowTitle) {
+        try {
+            String[] parts = windowTitle.split("_");
+            if (parts.length < 2) {
+                return null; // Keamanan array
+            }
+            int slotIndex = Integer.parseInt(parts[1]);
+            if (slotIndex >= panelLayar.getComponentCount()) {
+                return null; // Keamanan index
+            }
+            javax.swing.JPanel slotPanel = (javax.swing.JPanel) panelLayar.getComponent(slotIndex);
+            for (java.awt.Component comp : slotPanel.getComponents()) {
+                if (comp instanceof java.awt.Canvas) {
+                    return (java.awt.Canvas) comp;
+                }
+            }
+        } catch (Exception e) {
+            log("Gagal menemukan Canvas untuk " + windowTitle);
         }
         return null;
     }
@@ -198,13 +197,18 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         executor.shutdownNow();
     }
 
-    public void setRecordingEnabled(javax.swing.JCheckBox chk) {
-        this.chkAutoRecord = chk;
+    // ================= HELPER METHODS =================
+    private int findAvailableSlotIndex() {
+        // Cari angka index terkecil yang belum digunakan di deviceSlotMap (Maks 50 HP)
+        for (int i = 0; i < 50; i++) {
+            if (!deviceSlotMap.containsValue(i)) {
+                return i;
+            }
+        }
+        return panelLayar.getComponentCount(); // Fallback
     }
 
-    // ==========================================================
-    // DYNAMIC GRID MAKER (Dengan Tombol Close)
-    // ==========================================================
+    // ================= DYNAMIC GRID =================
     private void syncGridPanels(int requiredCount) {
         int currentCount = panelLayar.getComponentCount();
         panelLayar.setLayout(new java.awt.GridLayout(0, 4, 10, 10));
@@ -215,7 +219,7 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
                 cell.setBackground(java.awt.Color.BLACK);
                 cell.setBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(50, 50, 50)));
 
-                // 🔥 BIKIN HEADER (Judul & Tombol Close)
+                // HEADER (Judul & Tombol Close)
                 JPanel header = new JPanel(new java.awt.BorderLayout());
                 header.setBackground(new java.awt.Color(30, 30, 30));
                 header.setPreferredSize(new java.awt.Dimension(0, 25));
@@ -226,10 +230,10 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
 
                 JButton btnClose = new JButton("X");
                 btnClose.setMargin(new java.awt.Insets(0, 5, 0, 5));
-                btnClose.setBackground(new java.awt.Color(200, 50, 50)); // Merah elegan
+                btnClose.setBackground(new java.awt.Color(200, 50, 50));
                 btnClose.setForeground(java.awt.Color.WHITE);
                 btnClose.setFocusPainted(false);
-                btnClose.setVisible(false); // 💡 Sembunyikan kalau slot belum dipakai
+                btnClose.setVisible(false);
 
                 header.add(lblTitle, java.awt.BorderLayout.CENTER);
                 header.add(btnClose, java.awt.BorderLayout.EAST);
@@ -238,7 +242,6 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
                 java.awt.Canvas c = new java.awt.Canvas();
                 c.setBackground(java.awt.Color.BLACK);
 
-                // Masukkan Header & Canvas ke dalam Cell
                 cell.add(header, java.awt.BorderLayout.NORTH);
                 cell.add(c, java.awt.BorderLayout.CENTER);
 
@@ -250,43 +253,33 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         panelLayar.repaint();
     }
 
+    public void clearGrid() {
+        SwingUtilities.invokeLater(() -> {
+            panelLayar.removeAll();
+            panelLayar.revalidate();
+            panelLayar.repaint();
+        });
+    }
 
-    // ==========================================================
-    // CORE MIRROR: Sekarang mendukung Duplikasi (Multi-Instance)
-    // ==========================================================
+    // ================= CORE MIRROR =================
     private void startScrcpyMirror(String deviceId, boolean isClone) {
         if (deviceId == null) {
             return;
         }
 
         SwingUtilities.invokeLater(() -> {
-            // 1. Cari Slot Kosong
-            int tempIndex = -1;
-            int totalComponents = panelLayar.getComponentCount();
+            int targetIndex = findAvailableSlotIndex();
 
-            // Cek Map untuk melihat slot mana yang sudah terisi
-            for (int i = 0; i < 9; i++) {
-                if (!deviceSlotMap.containsValue(i)) {
-                    tempIndex = i;
-                    break;
-                }
-            }
-
-            if (tempIndex == -1) {
-                tempIndex = totalComponents;
-            }
-
-            // 2. Kunci variabel untuk Lambda
-            final int targetIndex = tempIndex;
-            final String slotKey = isClone ? deviceId + "_clone_" + System.currentTimeMillis() : deviceId;
+            // Format ID Bayangan untuk fitur Clone
+            String slotKey = isClone ? deviceId + "_clone_" + System.currentTimeMillis() : deviceId;
 
             log("Membuka Slot " + targetIndex + " untuk: " + deviceId);
             deviceSlotMap.put(slotKey, targetIndex);
 
-// 3. Pastikan Grid siap
+            // Pastikan Grid siap
             syncGridPanels(targetIndex + 1);
 
-            // 🔥 BACA STRUKTUR BARU CELL (Header & Canvas)
+            // Akses komponen Cell
             JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
             java.awt.BorderLayout layout = (java.awt.BorderLayout) cell.getLayout();
 
@@ -299,38 +292,32 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
 
             String windowTitle = "Mirror_" + targetIndex + "_" + (isClone ? "CLONE" : "ORIG");
 
-            // 🔥 TAMPILKAN UI & TOMBOL CLOSE
+            // Setup UI Header
             lblTitle.setText(" " + deviceId + (isClone ? " (Clone)" : ""));
             btnClose.setVisible(true);
 
-            // Bersihkan event listener lama (penting jika slot ini bekas pakai)
+            // Reset listener tombol close
             for (java.awt.event.ActionListener al : btnClose.getActionListeners()) {
                 btnClose.removeActionListener(al);
             }
 
-            // 🔥 PASANG FUNGSI KLIK TOMBOL CLOSE
             btnClose.addActionListener(e -> {
-                log("User menekan tutup pada: " + deviceId);
-                scrcpyService.stop(windowTitle); // 1. Matikan .exe scrcpy
-                deviceSlotMap.remove(slotKey);           // 2. Kosongkan jatah slot
+                log("Menutup slot: " + deviceId);
+                scrcpyService.stop(windowTitle);
+                deviceSlotMap.remove(slotKey);
 
-                // 3. Reset tampilan kotak kembali ke awal (kosong)
                 lblTitle.setText(" Slot Kosong " + (targetIndex + 1));
                 btnClose.setVisible(false);
                 targetCanvas.repaint();
             });
 
-            // 4. Jalankan Scrcpy di background thread
+            // Jalankan Scrcpy di background
             executor.submit(() -> {
                 try {
-                    // Start Scrcpy (dengan port unik)
                     boolean recordMode = (chkAutoRecord != null && chkAutoRecord.isSelected());
-                    scrcpyService.start(deviceId, windowTitle, recordMode); // Tambahkan recordMode di sini
+                    scrcpyService.start(deviceId, windowTitle, recordMode);
 
-                    // Berikan jeda 1 detik agar proses OS benar-benar muncul sebelum di-embed
-                    Thread.sleep(1000);
-
-                    // Tempelkan ke UI
+                    Thread.sleep(1000); // Jeda agar window siap
                     scrcpyService.embed(windowTitle, targetCanvas, this, spinX, spinY);
 
                 } catch (Exception e) {
@@ -341,80 +328,19 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         });
     }
 
-    // ==========================================================
-    // FITUR DUPLIKAT: Membuka HP yang sama di slot baru
-    // ==========================================================
     private void duplicateDevice(String deviceId) {
         if (deviceId == null) {
             return;
         }
-
         log("Menduplikasi tampilan untuk: " + deviceId + "...");
-
-        // Kita buat ID bayangan agar sistem slot kita tidak menganggap ini device yang sama
-        // Contoh: "RR8X102870L" menjadi "RR8X102870L_clone_1"
-        int cloneCount = 1;
-        String cloneId = deviceId + "_clone_" + cloneCount;
-
-        while (deviceSlotMap.containsKey(cloneId)) {
-            cloneCount++;
-            cloneId = deviceId + "_clone_" + cloneCount;
-        }
-
-        final String finalCloneId = cloneId;
-
-        SwingUtilities.invokeLater(() -> {
-            // Cari slot kosong
-            int targetIndex = -1;
-            int currentSlots = panelLayar.getComponentCount();
-
-            // Cari slot yang benar-benar belum terisi Canvas aktif
-            for (int i = 0; i < currentSlots; i++) {
-                if (!deviceSlotMap.containsValue(i)) {
-                    targetIndex = i;
-                    break;
-                }
-            }
-
-            // Jika tidak ada slot kosong di grid 3x1, tambah slot baru
-            if (targetIndex == -1) {
-                targetIndex = currentSlots;
-            }
-
-            deviceSlotMap.put(finalCloneId, targetIndex);
-            syncGridPanels(targetIndex + 1);
-
-            JPanel cell = (JPanel) panelLayar.getComponent(targetIndex);
-            Canvas targetCanvas = (Canvas) cell.getComponent(0);
-
-            executor.submit(() -> {
-                try {
-                    // Gunakan judul jendela unik agar JNA tidak bingung
-                    String windowTitle = "Scrcpy_Clone_" + System.currentTimeMillis();
-
-                    // Jalankan scrcpy untuk deviceId asli tapi ke windowTitle baru
-                    boolean recordMode = (chkAutoRecord != null && chkAutoRecord.isSelected());
-                    scrcpyService.start(deviceId, windowTitle, recordMode); // Tambahkan recordMode di sini
-
-                    // Tanamkan ke canvas
-                    scrcpyService.embed(windowTitle, targetCanvas, this, spinX, spinY);
-
-                } catch (Exception e) {
-                    log("Gagal Duplikasi: " + e.getMessage());
-                    deviceSlotMap.remove(finalCloneId);
-                }
-            });
-        });
+        startScrcpyMirror(deviceId, true);
     }
 
-// Menerima data List, tidak lagi memanggil adbService di dalam sini
     public void refreshDeviceList(List<String> devices) {
         SwingUtilities.invokeLater(() -> {
             DefaultListModel<String> model = new DefaultListModel<>();
             devices.forEach(model::addElement);
-
             jListDevices.setModel(model);
-            // activeDevices.clear(); // (Hapus baris ini seperti koreksi saya sebelumnya)
 
             panelLayar.revalidate();
             panelLayar.repaint();
@@ -422,7 +348,7 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         });
     }
 
-    // ================= UTIL =================
+    // ================= LOGGING & WATCHER =================
     public void log(String msg) {
         SwingUtilities.invokeLater(() -> {
             txtLog.append("> " + msg + "\n");
@@ -433,30 +359,23 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
     private void setupLogStyle() {
         txtLog.setEditable(false);
         txtLog.setBackground(Color.BLACK);
-        txtLog.setForeground(new Color(50, 255, 50)); // Tetap pertahankan warna hijau khas hacker
-        
-        // 🔥 UBAH DI SINI: Ganti "Consolas" jadi "Segoe UI Emoji" dan naikkan ukuran ke 13
-        txtLog.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 13)); 
+        txtLog.setForeground(new Color(50, 255, 50));
+        txtLog.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 13));
     }
 
     private void startAutoDeviceWatcher() {
         executor.submit(() -> {
             while (true) {
                 try {
-// Di dalam startAutoDeviceWatcher
                     Set<String> current = new HashSet<>(adbService.getConnectedDevices());
 
                     if (!current.equals(lastDevices)) {
                         lastDevices.clear();
                         lastDevices.addAll(current);
-
                         log("Perubahan device terdeteksi...");
-                        // 🔥 Lempar datanya ke UI, UI jangan disuruh cari data lagi
                         refreshDeviceList(new ArrayList<>(current));
                     }
-
                     Thread.sleep(2000);
-
                 } catch (Exception e) {
                     log("Watcher error: " + e.getMessage());
                 }
@@ -464,22 +383,17 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         });
     }
 
-    // ==========================================================
-    // MEMORY CLEANSING: Membersihkan komponen Grid (Mencegah Leak)
-    // ==========================================================
-    public void clearGrid() {
-        SwingUtilities.invokeLater(() -> {
-            panelLayar.removeAll(); // Hapus semua kotak Canvas dan JPanel dari memori
-            panelLayar.revalidate(); // Beritahu Java bahwa struktur UI berubah
-            panelLayar.repaint();    // Gambar ulang layar agar bersih secara visual
-        });
-    }
-
-    // ================= [ ACTION LISTENERS ] =================
+    // ================= GUI AUTO GENERATED BY NETBEANS =================
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
 
+        panelTopBar = new javax.swing.JPanel();
+        jLabel1 = new javax.swing.JLabel();
+        spinX = new javax.swing.JSpinner();
+        spinY = new javax.swing.JSpinner();
+        jLabel2 = new javax.swing.JLabel();
+        jLabel3 = new javax.swing.JLabel();
         panelDevices = new RoundedPanel(25);
         panelDevicesList = new javax.swing.JPanel();
         jPanel3 = new javax.swing.JPanel();
@@ -508,18 +422,66 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
         btnRecentAll = new javax.swing.JButton();
         btnHomeAll = new javax.swing.JButton();
         btnBackAll = new javax.swing.JButton();
-        panelTopBar = new javax.swing.JPanel();
-        jLabel1 = new javax.swing.JLabel();
-        spinX = new javax.swing.JSpinner();
-        spinY = new javax.swing.JSpinner();
-        jLabel2 = new javax.swing.JLabel();
-        jLabel3 = new javax.swing.JLabel();
-        panelLayar = new RoundedPanel(25);
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setAlwaysOnTop(true);
+        setCursor(new java.awt.Cursor(java.awt.Cursor.DEFAULT_CURSOR));
         setName("MainFrame"); // NOI18N
-        setPreferredSize(new java.awt.Dimension(1000, 600));
+        setPreferredSize(new java.awt.Dimension(280, 668));
         setResizable(false);
+        addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            public void mouseDragged(java.awt.event.MouseEvent evt) {
+                formMouseDragged(evt);
+            }
+        });
+        addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mousePressed(java.awt.event.MouseEvent evt) {
+                formMousePressed(evt);
+            }
+        });
+
+        panelTopBar.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 1, 1, 1));
+
+        jLabel1.setFont(new java.awt.Font("Segoe UI Black", 2, 14)); // NOI18N
+        jLabel1.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel1.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        jLabel1.setText("kunyuk.pro");
+        jLabel1.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
+
+        jLabel2.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel2.setText("X");
+
+        jLabel3.setForeground(new java.awt.Color(255, 255, 255));
+        jLabel3.setText("Y");
+
+        javax.swing.GroupLayout panelTopBarLayout = new javax.swing.GroupLayout(panelTopBar);
+        panelTopBar.setLayout(panelTopBarLayout);
+        panelTopBarLayout.setHorizontalGroup(
+            panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(panelTopBarLayout.createSequentialGroup()
+                .addContainerGap()
+                .addComponent(jLabel1)
+                .addGap(92, 92, 92)
+                .addComponent(jLabel2)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(3, 3, 3)
+                .addComponent(jLabel3)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+        );
+        panelTopBarLayout.setVerticalGroup(
+            panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addComponent(jLabel2)
+                .addComponent(jLabel3)
+                .addComponent(jLabel1))
+        );
+
+        getContentPane().add(panelTopBar, java.awt.BorderLayout.NORTH);
 
         panelDevices.setPreferredSize(new java.awt.Dimension(345, 640));
         panelDevices.setLayout(new javax.swing.BoxLayout(panelDevices, javax.swing.BoxLayout.Y_AXIS));
@@ -554,7 +516,7 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
 
         btnUSB.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnUSB.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/search.png"))); // NOI18N
-        btnUSB.setText("USB Debug");
+        btnUSB.setText("Search USB Debug");
         btnUSB.addActionListener(this::btnUSBActionPerformed);
         jPanel3.add(btnUSB, java.awt.BorderLayout.PAGE_END);
 
@@ -614,13 +576,13 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
                 .addContainerGap()
                 .addGroup(panelControlLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(panelControlLayout.createSequentialGroup()
-                        .addComponent(txtInputMasal, javax.swing.GroupLayout.DEFAULT_SIZE, 209, Short.MAX_VALUE)
+                        .addComponent(txtInputMasal)
                         .addGap(12, 12, 12)
                         .addComponent(btnSendText, javax.swing.GroupLayout.PREFERRED_SIZE, 101, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addGap(15, 15, 15))
                     .addGroup(panelControlLayout.createSequentialGroup()
                         .addComponent(chkSync)
-                        .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))))
+                        .addContainerGap(236, Short.MAX_VALUE))))
         );
         panelControlLayout.setVerticalGroup(
             panelControlLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -681,7 +643,7 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
                 .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(panelBulkLayout.createSequentialGroup()
                         .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(0, 41, Short.MAX_VALUE))
+                        .addGap(0, 37, Short.MAX_VALUE))
                     .addComponent(spLog))
                 .addContainerGap())
         );
@@ -691,7 +653,7 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
                 .addComponent(spLog, javax.swing.GroupLayout.PREFERRED_SIZE, 152, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(12, 12, 12)
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(24, Short.MAX_VALUE))
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
 
         panelDevices.add(panelBulk);
@@ -729,7 +691,7 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
             .addGroup(panelNavLayout.createSequentialGroup()
                 .addGap(14, 14, 14)
                 .addComponent(btnRecentAll)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 51, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 47, Short.MAX_VALUE)
                 .addComponent(btnHomeAll)
                 .addGap(48, 48, 48)
                 .addComponent(btnBackAll)
@@ -749,68 +711,10 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
 
         panelDevices.add(panelNav);
 
-        getContentPane().add(panelDevices, java.awt.BorderLayout.WEST);
-
-        panelTopBar.setBackground(new java.awt.Color(30, 30, 30));
-        panelTopBar.setPreferredSize(new java.awt.Dimension(1000, 30));
-
-        jLabel1.setFont(new java.awt.Font("Segoe UI Black", 2, 14)); // NOI18N
-        jLabel1.setForeground(new java.awt.Color(255, 255, 255));
-        jLabel1.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-        jLabel1.setText("kunyuk.pro");
-        jLabel1.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
-
-        jLabel2.setForeground(new java.awt.Color(255, 255, 255));
-        jLabel2.setText("X");
-
-        jLabel3.setForeground(new java.awt.Color(255, 255, 255));
-        jLabel3.setText("Y");
-
-        javax.swing.GroupLayout panelTopBarLayout = new javax.swing.GroupLayout(panelTopBar);
-        panelTopBar.setLayout(panelTopBarLayout);
-        panelTopBarLayout.setHorizontalGroup(
-            panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(panelTopBarLayout.createSequentialGroup()
-                .addContainerGap()
-                .addComponent(jLabel1)
-                .addGap(92, 92, 92)
-                .addComponent(jLabel2)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(3, 3, 3)
-                .addComponent(jLabel3)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(667, Short.MAX_VALUE))
-        );
-        panelTopBarLayout.setVerticalGroup(
-            panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(panelTopBarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                .addComponent(spinX, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addComponent(spinY, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addComponent(jLabel2)
-                .addComponent(jLabel3)
-                .addComponent(jLabel1))
-        );
-
-        getContentPane().add(panelTopBar, java.awt.BorderLayout.NORTH);
-
-        panelLayar.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
-
-        javax.swing.GroupLayout panelLayarLayout = new javax.swing.GroupLayout(panelLayar);
-        panelLayar.setLayout(panelLayarLayout);
-        panelLayarLayout.setHorizontalGroup(
-            panelLayarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGap(0, 653, Short.MAX_VALUE)
-        );
-        panelLayarLayout.setVerticalGroup(
-            panelLayarLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGap(0, 568, Short.MAX_VALUE)
-        );
-
-        getContentPane().add(panelLayar, java.awt.BorderLayout.CENTER);
+        getContentPane().add(panelDevices, java.awt.BorderLayout.CENTER);
 
         pack();
+        setLocationRelativeTo(null);
     }// </editor-fold>//GEN-END:initComponents
 
     private void btnRecentAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRecentAllActionPerformed
@@ -937,9 +841,26 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
     }//GEN-LAST:event_btnDuplicateActionPerformed
 
     private void btnRecordManagerActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRecordManagerActionPerformed
-        RecordControlFrame recFrame = new RecordControlFrame(this);
-        recFrame.setVisible(true);
+        if (recordControlFrame == null || !recordControlFrame.isVisible()) {
+            recordControlFrame = new RecordControlFrame(this);
+            recordControlFrame.setVisible(true);
+        } else {
+            // Jika sudah terbuka, bawa ke depan layar
+            recordControlFrame.toFront();
+            recordControlFrame.requestFocus();
+        }
     }//GEN-LAST:event_btnRecordManagerActionPerformed
+
+    private void formMousePressed(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_formMousePressed
+        mouseX = evt.getX();
+        mouseY = evt.getY();
+    }//GEN-LAST:event_formMousePressed
+
+    private void formMouseDragged(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_formMouseDragged
+        int x = evt.getXOnScreen();
+        int y = evt.getYOnScreen();
+        setLocation(x - mouseX, y - mouseY);
+    }//GEN-LAST:event_formMouseDragged
 
     public static void main(String args[]) {
 
@@ -991,7 +912,6 @@ public javax.swing.JSpinner getSpinY() { return spinY; }
     private javax.swing.JPanel panelControl;
     private javax.swing.JPanel panelDevices;
     private javax.swing.JPanel panelDevicesList;
-    private javax.swing.JPanel panelLayar;
     private javax.swing.JPanel panelNav;
     private javax.swing.JPanel panelTopBar;
     private javax.swing.JScrollPane spDevices;

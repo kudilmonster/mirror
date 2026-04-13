@@ -10,7 +10,7 @@ public class ViewerFrame extends JFrame {
     // Constructor menerima panelLayar dari MainDashboard
     public ViewerFrame(JPanel panelLayar) {
         setTitle("Kunyuk.pro - Screen Viewer");
-        setSize(1000, 700);
+        setSize(1024, 768);
         setLocationRelativeTo(null); // Posisikan di tengah layar
         
         // Cegah user mematikan aplikasi dengan close window ini langsung,
