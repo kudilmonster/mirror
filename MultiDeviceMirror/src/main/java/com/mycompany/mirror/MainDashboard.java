@@ -211,7 +211,7 @@ public class MainDashboard extends JFrame {
     // ================= DYNAMIC GRID =================
     private void syncGridPanels(int requiredCount) {
         int currentCount = panelLayar.getComponentCount();
-        panelLayar.setLayout(new java.awt.GridLayout(0, 4, 10, 10));
+        panelLayar.setLayout(new java.awt.GridLayout(0, 5, 10, 10));
 
         if (currentCount < requiredCount) {
             for (int i = currentCount; i < requiredCount; i++) {
@@ -582,7 +582,7 @@ public class MainDashboard extends JFrame {
                         .addGap(15, 15, 15))
                     .addGroup(panelControlLayout.createSequentialGroup()
                         .addComponent(chkSync)
-                        .addContainerGap(240, Short.MAX_VALUE))))
+                        .addContainerGap(238, Short.MAX_VALUE))))
         );
         panelControlLayout.setVerticalGroup(
             panelControlLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -642,7 +642,7 @@ public class MainDashboard extends JFrame {
             .addGroup(panelBulkLayout.createSequentialGroup()
                 .addContainerGap()
                 .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(spLog, javax.swing.GroupLayout.DEFAULT_SIZE, 331, Short.MAX_VALUE)
+                    .addComponent(spLog)
                     .addComponent(jPanel2, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
                 .addContainerGap())
         );
@@ -690,7 +690,7 @@ public class MainDashboard extends JFrame {
             .addGroup(panelNavLayout.createSequentialGroup()
                 .addGap(14, 14, 14)
                 .addComponent(btnRecentAll)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 51, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 49, Short.MAX_VALUE)
                 .addComponent(btnHomeAll)
                 .addGap(48, 48, 48)
                 .addComponent(btnBackAll)
