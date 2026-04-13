@@ -7,98 +7,111 @@ import javax.swing.*;
 
 public class ScrcpyService {
 
-    private final String executable; // Path ke scrcpy.exe
-    private final ExecutorService executor; // Untuk menjalankan di background
-    private final MainDashboard dashboard; // Untuk kirim log ke UI
+    private final String executable;
+    private final ExecutorService executor;
+    private final MainDashboard dashboard;
     private final Map<String, Process> runningProcesses = new ConcurrentHashMap<>();
-    // 🔥 Constructor baru: Menerima data dari MainDashboard
+
     public ScrcpyService(String executable, ExecutorService executor, MainDashboard dashboard) {
         this.executable = executable;
         this.executor = executor;
         this.dashboard = dashboard;
     }
 
-public void start(String deviceId, String windowTitle) {
+    public void start(String deviceId, String windowTitle, boolean isRecording) {
         executor.submit(() -> {
             try {
                 int randomPort = 20000 + new Random().nextInt(5000);
-
-                // Gunakan parameter yang paling dasar tapi efektif
-ProcessBuilder pb = new ProcessBuilder(
-    executable,
-    "-s", deviceId,
-    "--window-title", windowTitle,
-    "--always-on-top",
-    "--no-audio",
-    "--port", String.valueOf(randomPort),
-    
-    // 🔥 SETELAN DIET EKSTREM (SUPER RINGAN)
-    "--max-size", "480",              // 1. Turunkan ke 480p (Sangat direkomendasikan untuk layar duplikat yang ukurannya kecil di UI)
-    "--video-bit-rate", "1M",         // 2. 1 Mbps sudah lebih dari cukup untuk 480p
-    "--max-fps", "15",                // 3. 15-20 FPS. Agak kaku, tapi PC Anda akan sangat berterima kasih.
-    "--no-key-repeat",                // 4. Mencegah spam input
-    "--no-clipboard-autosync"        // 5. Matikan auto-sync copy-paste antara HP dan PC (mengurangi proses background)
-    //"--turn-screen-off"                 // 6. Matikan layar fisik HP saat di-mirror (Mencegah HP panas/throttling yang bikin lag)
-
-);
-
-                // Hapus baris --encoder karena itu penyebab utamanya
                 
+                // Siapkan folder rekaman
+                File recordDir = new File("recordings");
+                if (!recordDir.exists()) recordDir.mkdirs();
+
+                List<String> cmd = new ArrayList<>(Arrays.asList(
+                    executable,
+                    "-s", deviceId,
+                    "--window-title", windowTitle,
+                    "--always-on-top",
+                    "--no-audio-playback",
+                    "--port", String.valueOf(randomPort),
+                    "--max-size", "480",
+                    "--video-bit-rate", "1M", // 1 Mbps sudah cukup jernih
+                    "--max-fps", "15" // 15 FPS untuk PC yang lebih berterima kasih
+                ));
+
+                // 🔥 Jika fitur record dicentang
+                if (isRecording) {
+                    // 🔥 1. KOREKSI PENANGGALAN: Gunakan format yang benar
+                    String safeDeviceId = deviceId.replace(":", "_"); 
+                    java.time.LocalDateTime now = java.time.LocalDateTime.now();
+                    java.time.format.DateTimeFormatter dtf = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
+                    String dateString = now.format(dtf);
+                    
+                    String fileName = "REC_" + safeDeviceId + "_" + dateString + ".mkv";
+                    File recordFile = new File(recordDir, fileName);
+                    cmd.add("--record");
+                    cmd.add(recordFile.getAbsolutePath());
+                    dashboard.log("🎥 Recording Aktif: " + fileName);
+                }
+
+                ProcessBuilder pb = new ProcessBuilder(cmd);
                 Process p = pb.start();
                 runningProcesses.put(windowTitle, p);
 
                 dashboard.log("Memulai instance: " + windowTitle + " (Mode Hemat)");
 
             } catch (Exception e) {
+                // 🔥 2. TAMBAHKAN LOG KE CATCH BLOCK
                 dashboard.log("Gagal menjalankan Scrcpy: " + e.getMessage());
             }
         });
     }
 
     public void stopAll() {
-        // 1. Matikan semua proses Scrcpy dengan aman
+        // Matikan semua proses Scrcpy dengan aman
         runningProcesses.forEach((title, process) -> {
             if (process != null && process.isAlive()) {
-                process.destroyForcibly(); // 🔥 Gunakan destroyForcibly agar benar-benar mati
+                process.destroyForcibly(); 
             }
         });
         runningProcesses.clear();
 
-        // 2. Perintahkan Dashboard untuk menghapus komponen Grid dari memori
+        // 🔥 Perintahkan Dashboard untuk menghapus komponen Grid dari memori
         if (dashboard != null) {
             dashboard.clearGrid();
         }
     }
-    
-    // ==========================================================
-    // Menutup HANYA satu sesi (dipanggil saat tombol X diklik)
-    // ==========================================================
-    public void stopInstance(String windowTitle) {
+
+    // Tambahkan method ini di bawah stopAll()
+    public void stop(String windowTitle) {
         Process p = runningProcesses.remove(windowTitle);
         if (p != null && p.isAlive()) {
-            p.destroyForcibly(); // Matikan paksa .exe scrcpy tersebut
+            p.destroyForcibly();
             dashboard.log("Berhasil mematikan: " + windowTitle);
         }
     }
-        
+    
     // ==========================================================
-    // JNA EMBEDDING LOGIC (PINDAHAN DARI MAIN DASHBOARD)
+    // JNA EMBEDDING LOGIC (PERBAIKAN)
     // ==========================================================
     public void embed(String windowTitle, java.awt.Canvas canvas, MainDashboard dashboard, JSpinner spinX, JSpinner spinY) {
-        new Thread(() -> {
+        // 🔥 3. GANTI 'new Thread' dengan 'executor.submit'
+        executor.submit(() -> {
             com.sun.jna.platform.win32.WinDef.HWND foundHwnd = null;
             int retries = 0;
 
+            // Polling untuk mencari window scrcpy (timeout maks 20 * 600ms = 12 detik)
             while (foundHwnd == null && retries < 20) {
                 try {
-                    Thread.sleep(600); // Beri jeda sedikit lebih lama agar OS sempat render
+                    Thread.sleep(600); // Polling interval
                     foundHwnd = com.sun.jna.platform.win32.User32.INSTANCE.FindWindow(null, windowTitle);
                     retries++;
                 } catch (InterruptedException e) {}
             }
 
             if (foundHwnd != null) {
-                try { Thread.sleep(1000); } catch (InterruptedException e) {}
+                // 🔥 4. HAPUS SLEEP 1 DETIK YANG TIDAK PERLU INI
+                // try { Thread.sleep(1000); } catch (InterruptedException e) {}
 
                 final com.sun.jna.platform.win32.WinDef.HWND finalHwnd = foundHwnd;
                 com.sun.jna.platform.win32.WinDef.HWND canvasHwnd = new com.sun.jna.platform.win32.WinDef.HWND(com.sun.jna.Native.getComponentPointer(canvas));
@@ -111,6 +124,7 @@ ProcessBuilder pb = new ProcessBuilder(
                 com.sun.jna.platform.win32.User32.INSTANCE.SetParent(finalHwnd, canvasHwnd);
                 com.sun.jna.platform.win32.User32.INSTANCE.ShowWindow(finalHwnd, com.sun.jna.platform.win32.WinUser.SW_SHOW);
 
+                // Fungsi Resize Otomatis
                 Runnable doResize = () -> {
                     int canvasW = canvas.getWidth();
                     int canvasH = canvas.getHeight();
@@ -132,17 +146,21 @@ ProcessBuilder pb = new ProcessBuilder(
                     }
                 };
 
-                spinX.addChangeListener(e -> doResize.run());
-                spinY.addChangeListener(e -> doResize.run());
+                // Hapus listener lama jika ada (mencegah leak)
+                for (java.awt.event.ComponentListener cl : canvas.getComponentListeners()) {
+                    canvas.removeComponentListener(cl);
+                }
+
                 canvas.addComponentListener(new java.awt.event.ComponentAdapter() {
                     @Override public void componentResized(java.awt.event.ComponentEvent e) { doResize.run(); }
                 });
 
+                // Jalankan resize awal di Event Dispatch Thread
                 SwingUtilities.invokeLater(doResize);
                 dashboard.log("✅ Berhasil embed ke Slot: " + windowTitle);
             } else {
                 dashboard.log("❌ Gagal: Jendela Scrcpy " + windowTitle + " tidak ditemukan.");
             }
-        }).start();
+        });
     }
 }

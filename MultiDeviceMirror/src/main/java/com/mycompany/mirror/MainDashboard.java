@@ -8,6 +8,7 @@ import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -40,12 +41,15 @@ public class MainDashboard extends JFrame {
         }
     }
 
+    public javax.swing.JList<String> getJListDevices() {
+        return jListDevices;
+    }
     // ================= CONFIG =================
     private final String basePath = System.getProperty("user.dir") + "\\scrcpy\\";
     private final String scrcpyExecutable = basePath + "scrcpy.exe";
     public final String adbExecutable = basePath + "adb.exe";
     //==================================================
-    private ScrcpyService scrcpyService;
+    public ScrcpyService scrcpyService;
     private SyncService syncService;
     public AdbService adbService;
 
@@ -53,11 +57,41 @@ public class MainDashboard extends JFrame {
     private final Set<String> activeDevices = new HashSet<>();
     private final Set<String> lastDevices = new HashSet<>();
     // Tambahkan ini untuk mengunci HP ke slot spesifik
-    private final Map<String, Integer> deviceSlotMap = new HashMap<>();
+    //private final Map<String, Integer> deviceSlotMap = new HashMap<>();
+    private final Map<String, Integer> deviceSlotMap = new ConcurrentHashMap<>();
     public final ExecutorService executor = Executors.newFixedThreadPool(10);
     public ViewerFrame viewerFrame;
+    private javax.swing.JCheckBox chkAutoRecord;
+    
+    public java.awt.Canvas getCanvasFromSlot(String windowTitle) {
+    try {
+        // Ambil index dari windowTitle (Misal: Mirror_2_ORIG -> index 2)
+        String[] parts = windowTitle.split("_");
+        int slotIndex = Integer.parseInt(parts[1]);
+        
+        // Ambil panel kotak di index tersebut
+        javax.swing.JPanel slotPanel = (javax.swing.JPanel) panelLayar.getComponent(slotIndex);
+        
+        // Cari komponen Canvas di dalam panel tersebut
+        for (java.awt.Component comp : slotPanel.getComponents()) {
+            if (comp instanceof java.awt.Canvas) {
+                return (java.awt.Canvas) comp;
+            }
+        }
+    } catch (Exception e) {
+        log("Gagal menemukan Canvas untuk " + windowTitle);
+    }
+    return null;
+}
+
+// Tambahkan juga getter untuk Spinner jika belum ada
+public javax.swing.JSpinner getSpinX() { return spinX; }
+public javax.swing.JSpinner getSpinY() { return spinY; }
+
+
 
 // ================= CONSTRUCTOR =================
+
     public MainDashboard() {
         initComponents();
 
@@ -142,9 +176,30 @@ public class MainDashboard extends JFrame {
         });
     }
 
+    //=====================================
+    public String getSelectedWindowTitle() {
+        String deviceId = jListDevices.getSelectedValue();
+        if (deviceId == null) {
+            return null;
+        }
+
+        // Kita cari windowTitle yang terdaftar di map berdasarkan deviceId
+        // Karena saat start kita pakai format "Mirror_index_ORIG"
+        for (Map.Entry<String, Integer> entry : deviceSlotMap.entrySet()) {
+            if (entry.getKey().equals(deviceId)) {
+                return "Mirror_" + entry.getValue() + "_ORIG";
+            }
+        }
+        return null;
+    }
+
     private void shutdown() {
         scrcpyService.stopAll();
         executor.shutdownNow();
+    }
+
+    public void setRecordingEnabled(javax.swing.JCheckBox chk) {
+        this.chkAutoRecord = chk;
     }
 
     // ==========================================================
@@ -194,6 +249,7 @@ public class MainDashboard extends JFrame {
         panelLayar.revalidate();
         panelLayar.repaint();
     }
+
 
     // ==========================================================
     // CORE MIRROR: Sekarang mendukung Duplikasi (Multi-Instance)
@@ -255,7 +311,7 @@ public class MainDashboard extends JFrame {
             // 🔥 PASANG FUNGSI KLIK TOMBOL CLOSE
             btnClose.addActionListener(e -> {
                 log("User menekan tutup pada: " + deviceId);
-                scrcpyService.stopInstance(windowTitle); // 1. Matikan .exe scrcpy
+                scrcpyService.stop(windowTitle); // 1. Matikan .exe scrcpy
                 deviceSlotMap.remove(slotKey);           // 2. Kosongkan jatah slot
 
                 // 3. Reset tampilan kotak kembali ke awal (kosong)
@@ -268,7 +324,8 @@ public class MainDashboard extends JFrame {
             executor.submit(() -> {
                 try {
                     // Start Scrcpy (dengan port unik)
-                    scrcpyService.start(deviceId, windowTitle);
+                    boolean recordMode = (chkAutoRecord != null && chkAutoRecord.isSelected());
+                    scrcpyService.start(deviceId, windowTitle, recordMode); // Tambahkan recordMode di sini
 
                     // Berikan jeda 1 detik agar proses OS benar-benar muncul sebelum di-embed
                     Thread.sleep(1000);
@@ -336,7 +393,8 @@ public class MainDashboard extends JFrame {
                     String windowTitle = "Scrcpy_Clone_" + System.currentTimeMillis();
 
                     // Jalankan scrcpy untuk deviceId asli tapi ke windowTitle baru
-                    scrcpyService.start(deviceId, windowTitle);
+                    boolean recordMode = (chkAutoRecord != null && chkAutoRecord.isSelected());
+                    scrcpyService.start(deviceId, windowTitle, recordMode); // Tambahkan recordMode di sini
 
                     // Tanamkan ke canvas
                     scrcpyService.embed(windowTitle, targetCanvas, this, spinX, spinY);
@@ -375,8 +433,10 @@ public class MainDashboard extends JFrame {
     private void setupLogStyle() {
         txtLog.setEditable(false);
         txtLog.setBackground(Color.BLACK);
-        txtLog.setForeground(new Color(50, 255, 50));
-        txtLog.setFont(new Font("Consolas", Font.PLAIN, 10));
+        txtLog.setForeground(new Color(50, 255, 50)); // Tetap pertahankan warna hijau khas hacker
+        
+        // 🔥 UBAH DI SINI: Ganti "Consolas" jadi "Segoe UI Emoji" dan naikkan ukuran ke 13
+        txtLog.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 13)); 
     }
 
     private void startAutoDeviceWatcher() {
@@ -428,9 +488,9 @@ public class MainDashboard extends JFrame {
         btnDuplicate = new javax.swing.JButton();
         btnUSB = new javax.swing.JButton();
         jPanel1 = new javax.swing.JPanel();
-        btnConnectWiFi = new javax.swing.JButton();
-        btnRefresh = new javax.swing.JButton();
         btnConnect = new javax.swing.JButton();
+        btnRefresh = new javax.swing.JButton();
+        btnConnectWiFi = new javax.swing.JButton();
         btnEnableTcp5555 = new javax.swing.JButton();
         panelControl = new javax.swing.JPanel();
         btnSendText = new javax.swing.JButton();
@@ -442,6 +502,7 @@ public class MainDashboard extends JFrame {
         jPanel2 = new javax.swing.JPanel();
         btnRebootAll = new javax.swing.JButton();
         btnScreenshotAll = new javax.swing.JButton();
+        btnRecordManager = new javax.swing.JButton();
         btnInstallAPK = new javax.swing.JButton();
         panelNav = new javax.swing.JPanel();
         btnRecentAll = new javax.swing.JButton();
@@ -501,13 +562,10 @@ public class MainDashboard extends JFrame {
 
         jPanel1.setLayout(new java.awt.GridLayout(2, 0, 5, 5));
 
-        btnConnectWiFi.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnConnectWiFi.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/wifi.png"))); // NOI18N
-        btnConnectWiFi.setText("Wi-Fi Debug");
-        btnConnectWiFi.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
-        btnConnectWiFi.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
-        btnConnectWiFi.addActionListener(this::btnConnectWiFiActionPerformed);
-        jPanel1.add(btnConnectWiFi);
+        btnConnect.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnConnect.setText("Connect");
+        btnConnect.addActionListener(this::btnConnectActionPerformed);
+        jPanel1.add(btnConnect);
 
         btnRefresh.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnRefresh.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/refresh.png"))); // NOI18N
@@ -517,14 +575,17 @@ public class MainDashboard extends JFrame {
         btnRefresh.addActionListener(this::btnRefreshActionPerformed);
         jPanel1.add(btnRefresh);
 
-        btnConnect.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
-        btnConnect.setText("Connect");
-        btnConnect.addActionListener(this::btnConnectActionPerformed);
-        jPanel1.add(btnConnect);
+        btnConnectWiFi.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
+        btnConnectWiFi.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/wifi.png"))); // NOI18N
+        btnConnectWiFi.setText("Wi-Fi Debug");
+        btnConnectWiFi.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
+        btnConnectWiFi.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
+        btnConnectWiFi.addActionListener(this::btnConnectWiFiActionPerformed);
+        jPanel1.add(btnConnectWiFi);
 
         btnEnableTcp5555.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnEnableTcp5555.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/adb.png"))); // NOI18N
-        btnEnableTcp5555.setText("ADB");
+        btnEnableTcp5555.setText("TCP IP");
         btnEnableTcp5555.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
         btnEnableTcp5555.setVerticalTextPosition(javax.swing.SwingConstants.BOTTOM);
         btnEnableTcp5555.addActionListener(this::btnEnableTcp5555ActionPerformed);
@@ -590,7 +651,7 @@ public class MainDashboard extends JFrame {
         txtLog.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
         spLog.setViewportView(txtLog);
 
-        jPanel2.setLayout(new java.awt.GridLayout(1, 0, 10, 0));
+        jPanel2.setLayout(new java.awt.GridLayout(0, 3, 1, 0));
 
         btnRebootAll.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnRebootAll.setText("Reboot All");
@@ -602,6 +663,10 @@ public class MainDashboard extends JFrame {
         btnScreenshotAll.addActionListener(this::btnScreenshotAllActionPerformed);
         jPanel2.add(btnScreenshotAll);
 
+        btnRecordManager.setText("Record");
+        btnRecordManager.addActionListener(this::btnRecordManagerActionPerformed);
+        jPanel2.add(btnRecordManager);
+
         btnInstallAPK.setFont(new java.awt.Font("Segoe UI Semibold", 0, 10)); // NOI18N
         btnInstallAPK.setText("Install APK");
         btnInstallAPK.addActionListener(this::btnInstallAPKActionPerformed);
@@ -611,21 +676,22 @@ public class MainDashboard extends JFrame {
         panelBulk.setLayout(panelBulkLayout);
         panelBulkLayout.setHorizontalGroup(
             panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, panelBulkLayout.createSequentialGroup()
-                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(spLog)
-                    .addComponent(jPanel2, javax.swing.GroupLayout.DEFAULT_SIZE, 332, Short.MAX_VALUE))
+            .addGroup(panelBulkLayout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(panelBulkLayout.createSequentialGroup()
+                        .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(0, 41, Short.MAX_VALUE))
+                    .addComponent(spLog))
                 .addContainerGap())
         );
         panelBulkLayout.setVerticalGroup(
             panelBulkLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(panelBulkLayout.createSequentialGroup()
-                .addContainerGap()
                 .addComponent(spLog, javax.swing.GroupLayout.PREFERRED_SIZE, 152, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, 27, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(36, Short.MAX_VALUE))
+                .addGap(12, 12, 12)
+                .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(24, Short.MAX_VALUE))
         );
 
         panelDevices.add(panelBulk);
@@ -870,6 +936,11 @@ public class MainDashboard extends JFrame {
         }
     }//GEN-LAST:event_btnDuplicateActionPerformed
 
+    private void btnRecordManagerActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnRecordManagerActionPerformed
+        RecordControlFrame recFrame = new RecordControlFrame(this);
+        recFrame.setVisible(true);
+    }//GEN-LAST:event_btnRecordManagerActionPerformed
+
     public static void main(String args[]) {
 
         try {
@@ -903,6 +974,7 @@ public class MainDashboard extends JFrame {
     private javax.swing.JButton btnInstallAPK;
     private javax.swing.JButton btnRebootAll;
     private javax.swing.JButton btnRecentAll;
+    private javax.swing.JButton btnRecordManager;
     private javax.swing.JButton btnRefresh;
     private javax.swing.JButton btnScreenshotAll;
     private javax.swing.JButton btnSendText;
