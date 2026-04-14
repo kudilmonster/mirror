@@ -108,7 +108,7 @@ public class MainDashboard extends JFrame {
 
         // Tampilkan layar kedua (Viewer)
         viewerFrame.setVisible(true);
-
+        viewerFrame.setExtendedState(JFrame.MAXIMIZED_BOTH);
         // ======== EVENT LISTENERS ========
         viewerFrame.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
@@ -154,6 +154,13 @@ public class MainDashboard extends JFrame {
 
     public void setRecordingEnabled(javax.swing.JCheckBox chk) {
         this.chkAutoRecord = chk;
+    }
+
+    // 🔥 VARIABEL STATUS AUDIO (Tanpa tombol UI agar aman dari NetBeans)
+    public boolean isAudioMuted = true; // Default: Suara PC dibisukan
+
+    public boolean isMutePlayback() {
+        return isAudioMuted;
     }
 
     public String getSelectedWindowTitle() {
@@ -315,7 +322,7 @@ public class MainDashboard extends JFrame {
             executor.submit(() -> {
                 try {
                     boolean recordMode = (chkAutoRecord != null && chkAutoRecord.isSelected());
-                    scrcpyService.start(deviceId, windowTitle, recordMode);
+                    scrcpyService.start(deviceId, windowTitle, recordMode, isMutePlayback());
 
                     Thread.sleep(1000); // Jeda agar window siap
                     scrcpyService.embed(windowTitle, targetCanvas, this, spinX, spinY);
@@ -765,7 +772,7 @@ public class MainDashboard extends JFrame {
         if (selectedID != null) {
             String folderPath = System.getProperty("user.home") + File.separator + "Documents" + File.separator + "Mirror_Screenshots";
             new File(folderPath).mkdirs();
-            
+
             // Masukkan 1 device yang dipilih ke dalam list tunggal
             adbService.screenshotMassal(folderPath, Collections.singletonList(selectedID));
             log("📸 Screenshot diambil untuk: " + selectedID);

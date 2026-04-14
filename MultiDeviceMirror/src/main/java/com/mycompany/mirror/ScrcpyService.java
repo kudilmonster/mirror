@@ -18,12 +18,12 @@ public class ScrcpyService {
         this.dashboard = dashboard;
     }
 
-    public void start(String deviceId, String windowTitle, boolean isRecording) {
+    // 🔥 DITAMBAHKAN PARAMETER: boolean mutePlayback
+    public void start(String deviceId, String windowTitle, boolean isRecording, boolean mutePlayback) {
         executor.submit(() -> {
             try {
                 int randomPort = 20000 + new Random().nextInt(5000);
                 
-                // Siapkan folder rekaman
                 File recordDir = new File("recordings");
                 if (!recordDir.exists()) recordDir.mkdirs();
 
@@ -32,17 +32,18 @@ public class ScrcpyService {
                     "-s", deviceId,
                     "--window-title", windowTitle,
                     "--always-on-top",
-                    "--no-audio-playback",
-                    "--record=file.mkv",
                     "--port", String.valueOf(randomPort),
                     "--max-size", "480",
-                    "--video-bit-rate", "1M", // 1 Mbps sudah cukup jernih
-                    "--max-fps", "15" // 15 FPS untuk PC yang lebih berterima kasih
+                    "--video-bit-rate", "1M", 
+                    "--max-fps", "15" 
                 ));
 
-                // 🔥 Jika fitur record dicentang
+                // 🔥 LOGIKA TOGGLE AUDIO: Mute PC Playback jika dicentang
+                if (mutePlayback) {
+                    cmd.add("--no-audio-playback");
+                }
+
                 if (isRecording) {
-                    // 🔥 1. KOREKSI PENANGGALAN: Gunakan format yang benar
                     String safeDeviceId = deviceId.replace(":", "_"); 
                     java.time.LocalDateTime now = java.time.LocalDateTime.now();
                     java.time.format.DateTimeFormatter dtf = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
@@ -59,17 +60,15 @@ public class ScrcpyService {
                 Process p = pb.start();
                 runningProcesses.put(windowTitle, p);
 
-                dashboard.log("Memulai instance: " + windowTitle + " (Mode Hemat)");
+                dashboard.log("Memulai instance: " + windowTitle);
 
             } catch (Exception e) {
-                // 🔥 2. TAMBAHKAN LOG KE CATCH BLOCK
                 dashboard.log("Gagal menjalankan Scrcpy: " + e.getMessage());
             }
         });
     }
 
     public void stopAll() {
-        // Matikan semua proses Scrcpy dengan aman
         runningProcesses.forEach((title, process) -> {
             if (process != null && process.isAlive()) {
                 process.destroyForcibly(); 
@@ -77,13 +76,11 @@ public class ScrcpyService {
         });
         runningProcesses.clear();
 
-        // 🔥 Perintahkan Dashboard untuk menghapus komponen Grid dari memori
         if (dashboard != null) {
             dashboard.clearGrid();
         }
     }
-
-    // Tambahkan method ini di bawah stopAll()
+    
     public void stop(String windowTitle) {
         Process p = runningProcesses.remove(windowTitle);
         if (p != null && p.isAlive()) {
@@ -91,29 +88,21 @@ public class ScrcpyService {
             dashboard.log("Berhasil mematikan: " + windowTitle);
         }
     }
-    
-    // ==========================================================
-    // JNA EMBEDDING LOGIC (PERBAIKAN)
-    // ==========================================================
+
     public void embed(String windowTitle, java.awt.Canvas canvas, MainDashboard dashboard, JSpinner spinX, JSpinner spinY) {
-        // 🔥 3. GANTI 'new Thread' dengan 'executor.submit'
         executor.submit(() -> {
             com.sun.jna.platform.win32.WinDef.HWND foundHwnd = null;
             int retries = 0;
 
-            // Polling untuk mencari window scrcpy (timeout maks 20 * 600ms = 12 detik)
             while (foundHwnd == null && retries < 20) {
                 try {
-                    Thread.sleep(600); // Polling interval
+                    Thread.sleep(600); 
                     foundHwnd = com.sun.jna.platform.win32.User32.INSTANCE.FindWindow(null, windowTitle);
                     retries++;
                 } catch (InterruptedException e) {}
             }
 
             if (foundHwnd != null) {
-                // 🔥 4. HAPUS SLEEP 1 DETIK YANG TIDAK PERLU INI
-                // try { Thread.sleep(1000); } catch (InterruptedException e) {}
-
                 final com.sun.jna.platform.win32.WinDef.HWND finalHwnd = foundHwnd;
                 com.sun.jna.platform.win32.WinDef.HWND canvasHwnd = new com.sun.jna.platform.win32.WinDef.HWND(com.sun.jna.Native.getComponentPointer(canvas));
 
@@ -125,7 +114,6 @@ public class ScrcpyService {
                 com.sun.jna.platform.win32.User32.INSTANCE.SetParent(finalHwnd, canvasHwnd);
                 com.sun.jna.platform.win32.User32.INSTANCE.ShowWindow(finalHwnd, com.sun.jna.platform.win32.WinUser.SW_SHOW);
 
-                // Fungsi Resize Otomatis
                 Runnable doResize = () -> {
                     int canvasW = canvas.getWidth();
                     int canvasH = canvas.getHeight();
@@ -147,7 +135,6 @@ public class ScrcpyService {
                     }
                 };
 
-                // Hapus listener lama jika ada (mencegah leak)
                 for (java.awt.event.ComponentListener cl : canvas.getComponentListeners()) {
                     canvas.removeComponentListener(cl);
                 }
@@ -156,7 +143,6 @@ public class ScrcpyService {
                     @Override public void componentResized(java.awt.event.ComponentEvent e) { doResize.run(); }
                 });
 
-                // Jalankan resize awal di Event Dispatch Thread
                 SwingUtilities.invokeLater(doResize);
                 dashboard.log("✅ Berhasil embed ke Slot: " + windowTitle);
             } else {
