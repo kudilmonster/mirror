@@ -61,7 +61,7 @@ public class MainDashboard extends JFrame {
     // ================= CONSTRUCTOR =================
     public MainDashboard() {
         initComponents();
-        // 🔥 GARANSI INISIALISASI: Jika NetBeans ikut menghapus panel ini dari UI, kita buat ulang!
+        
         if (panelLayar == null) {
             panelLayar = new RoundedPanel(25);
             panelLayar.setBorder(javax.swing.BorderFactory.createEmptyBorder(1, 1, 1, 1));
@@ -452,7 +452,7 @@ public class MainDashboard extends JFrame {
         jLabel1.setFont(new java.awt.Font("Segoe UI Black", 2, 14)); // NOI18N
         jLabel1.setForeground(new java.awt.Color(255, 255, 255));
         jLabel1.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-        jLabel1.setText("kunyuk.pro");
+        jLabel1.setText("putra.mas");
         jLabel1.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
 
         jLabel2.setForeground(new java.awt.Color(255, 255, 255));
@@ -499,11 +499,6 @@ public class MainDashboard extends JFrame {
 
         jPanel3.setLayout(new java.awt.BorderLayout(5, 5));
 
-        jListDevices.setModel(new javax.swing.AbstractListModel<String>() {
-            String[] strings = { "Item 1", "Item 2", "Item 3", "Item 4", "Item 5" };
-            public int getSize() { return strings.length; }
-            public String getElementAt(int i) { return strings[i]; }
-        });
         jListDevices.addMouseListener(new java.awt.event.MouseAdapter() {
             public void mouseClicked(java.awt.event.MouseEvent evt) {
                 jListDevicesMouseClicked(evt);
@@ -659,7 +654,7 @@ public class MainDashboard extends JFrame {
                 .addComponent(spLog, javax.swing.GroupLayout.PREFERRED_SIZE, 152, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(12, 12, 12)
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(83, Short.MAX_VALUE))
+                .addContainerGap(42, Short.MAX_VALUE))
         );
 
         panelDevices.add(panelBulk);
@@ -896,13 +891,27 @@ public class MainDashboard extends JFrame {
             javax.swing.UIManager.put("ScrollBar.thumbArc", 999);
             javax.swing.UIManager.put("ScrollBar.width", 10);
 
-        } catch (Exception ex) {
+ /*       } catch (Exception ex) {
             System.err.println("Gagal memuat tema Mac: " + ex.getMessage());
         }
 
         java.awt.EventQueue.invokeLater(() -> {
             new MainDashboard().setVisible(true);
         });
+*/
+ } catch (Exception ex) {
+            System.err.println("Gagal memuat tema Mac: " + ex.getMessage());
+        }
+
+        // 🔥 PASANG PENGECEKAN LISENSI DI SINI SEBELUM DASHBOARD TERBUKA
+        if (!LicenseManager.checkAndVerify()) {
+            // Jika lisensi salah atau user menekan Cancel, matikan program paksa
+            System.exit(0);
+        }
+
+        // Jika lisensi benar (atau sudah pernah aktivasi sebelumnya), buka Dashboard
+        java.awt.EventQueue.invokeLater(() -> new MainDashboard().setVisible(true));
+ 
     }
     // Variables declaration - do not modify//GEN-BEGIN:variables
     private javax.swing.JButton btnBackAll;
